@@ -27,7 +27,7 @@ public class Game : GameWindow
     private RenderSystem m_renderSystem;
     private readonly FreeFlyCameraSystem m_freeFlyCameraSystem;
     private readonly RotateSystem m_rotateSystem;
-    private readonly QuakeMapLoader.Map m_map;
+    private readonly QuakeMap m_map;
     private readonly Stopwatch m_frameTimeStopwatch = new Stopwatch();
 
     public Game(int width, int height, string title) :

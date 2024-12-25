@@ -1,0 +1,494 @@
+using System.Data;
+using System.Runtime.InteropServices;
+using OpenTK.Mathematics;
+
+namespace nb3D.Map;
+
+/**
+ * References:
+ *      https://www.gamers.org/dEngine/quake/spec/quake-spec34/qkspec_4.htm
+ *      https://github.com/demoth/jake2/blob/main/info/BSP.md
+ *      https://developer.valvesoftware.com/wiki/BSP_(GoldSrc)
+ *
+ * Support BSP29 and BSP30 (GoldSrc)
+ * 
+ * IMPORTANT: long are converted to integers !!
+ */
+public partial class QuakeMap
+{
+    public struct Vec3S
+    {
+        public short X;
+        public short Y;
+        public short Z;
+    }
+        
+    public struct BoundingBox
+    {
+        public Vector3 Min;
+        public Vector3 Max;
+    }
+            
+    public struct BoundingBoxS
+    {
+        public Vec3S Min;
+        public Vec3S Max;
+    }
+    
+    public struct BspLeaf
+    {
+        public int Type;                // Special type of leaf
+        public int VisList;             // Beginning of visibility lists; must be -1 or in [0, numvislist[
+        public BoundingBoxS Box;        // Bounding box of the leaf
+        public short SurfaceListIndex;  // Index of the first surface in the list of surface IDs, must be in [0, SurfaceCount[
+        // This is NOT the ID of the surface
+        public short SurfaceCount;      // Number of surfaces
+            
+        // Ambient sound volumes, ff = max
+        public byte Sndwater;          
+        public byte Sndsky;            
+        public byte Sndslime;          
+        public byte Sndlava;
+    }
+        
+    public struct Hull
+    {
+        public BoundingBox BoundingBox; // The bounding box of the hull
+        public Vector3 Origin;          // Always (0,0,0)
+        public int NodeId0;             // Index of first BSP node
+        public int NodeId1;             // Index of the first bound node
+        public int NodeId2;             // Index of the second bound node 
+        public int NodeId3;             // Usually zero
+        public int VisLeafCount;        // Number of visible BSP leaves
+        public int SurfaceListIndex;    // Index of the first surface in the list of surfaces
+        public int SurfaceCount;        // Number of surfaces
+    }
+    
+    private struct BspNode
+    {
+        public int PlaneId;         // Id of the plane that splits the node (intersecting plane), must be in [0,numplanes[ 
+        public short Front;         // Index to (front >= 0) ? front child node : leaf[~front]
+        public short Back;          // Index to (back >= 0) ? back child node : leaf[~back]
+        public BoundingBoxS Box;    // Bounding box
+        public ushort SurfaceId;    // Id of the first surface
+        public ushort SurfaceCount; // Number of surfaces
+    }
+    
+    private struct Plane
+    {
+        public Vector3 Normal;  // Vector orthogonal to plane (Nx,Ny,Nz) with Nx2+Ny2+Nz2 = 1
+        public float Dist;		// Offset to plane, along the normal vector
+        public int Type;		// Plane type
+    }
+        
+    private struct Surface
+    {
+        public ushort PlaneId;      // The plane in which the surface lies
+        public ushort Side;		    // 0 if in front of the plane, 1 if behind the plane
+        public int EdgeListIndex;   // First edge in the list of edges
+        public ushort EdgeCount;    // Index of the first edge in the list of edges
+        // This is NOT the ID of the edge
+        public ushort TexinfoId;    // Index to the texture info which contains an index to the mipmap texture
+            
+        // Type of light or 0xFF for no light map
+        public byte Lightstyle0;
+        public byte Lightstyle1;
+        public byte Lightstyle2;
+        public byte Lightstyle3;
+        public int Lightmap;         // Offset to the lightmap or -1
+    }
+    
+    private struct Edge
+    {
+        public ushort Vertex0;
+        public ushort Vertex1;
+    }
+    
+    private struct Vertex
+    {
+        public float X;
+        public float Y;
+        public float Z;
+    
+        public override string ToString() => $"({X}, {Y}, {Z})";
+    }
+    
+    [StructLayout(LayoutKind.Explicit, Pack = 0)]
+    private unsafe struct MipTexture
+    {
+        [FieldOffset(0)] public fixed char Name[16];        // Name of the texture.
+        [FieldOffset(16)] public uint Width;                // width of picture, must be a multiple of 8
+        [FieldOffset(20)] public uint Height;               // height of picture, must be a multiple of 8
+        [FieldOffset(24)] public uint Offset1;              // offset to u_char Pix[width   * height]
+        [FieldOffset(28)] public uint Offset2;              // offset to u_char Pix[width/2 * height/2]
+        [FieldOffset(32)] public uint Offset4;              // offset to u_char Pix[width/4 * height/4]
+        [FieldOffset(36)] public uint Offset8;              // offset to u_char Pix[width/8 * height/8]
+    }
+    
+    private struct TextureInfo
+    {
+        public Vector3 Snrm;    // S projection
+        public float Soff;      // S offset
+        public Vector3 Tnrm;    // T projection
+        public float Toff;		// T offset
+        public int TexId;		// Id to the mipmap texture
+        public int Flag;		// Flag for sky/water texture
+    }
+        
+    private struct Entry
+    {
+        public int Offset;  // Offset to entry, in bytes, from start of file
+        public int Size;    // Size of entry in file, in bytes
+    }
+        
+    private struct Header
+    {
+        public int Version;
+        public Entry Entities;
+        public Entry Planes;
+        public Entry Miptex;
+        public Entry Vertices;
+        public Entry Visilist;
+        public Entry Nodes;
+        public Entry Texinfo;
+        public Entry Surfaces;
+        public Entry Lightmaps;
+        public Entry BoundNodes;
+        public Entry Leaves;
+        public Entry SurfaceList;
+        public Entry Edges;
+        public Entry EdgeList;
+        public Entry Hulls;
+    }
+    
+    private static readonly int[] SupportedVersions = { 29, 30 };
+    private readonly Header m_header;
+    private readonly byte[] m_data;
+    private readonly Dictionary<int, QuakeMapMesh[]> m_meshes;
+    private readonly QuakeTexture[] m_textures;
+    private readonly QuakeLightmap m_fullLitLightmap;
+
+    public unsafe int PlaneCount => m_header.Planes.Size / sizeof(Plane);
+    public unsafe int NodeCount => m_header.Nodes.Size / sizeof(BspNode);
+    public unsafe int LeafCount => m_header.Leaves.Size / sizeof(BspLeaf);
+    public unsafe int SurfaceCount => m_header.Surfaces.Size / sizeof(Surface);
+    public unsafe int HullCount => m_header.Hulls.Size / sizeof(Hull);
+    public unsafe int TextureInfoCount => m_header.Texinfo.Size / sizeof(TextureInfo);
+    public unsafe int LightMapCount => m_header.Lightmaps.Size / sizeof(TextureInfo);
+
+    public QuakeMap(byte[] data, QuakePalette palette)
+    {
+        var pData = GCHandle.Alloc(data, GCHandleType.Pinned);
+        var header = (Header)Marshal.PtrToStructure(pData.AddrOfPinnedObject(), typeof(Header))!;
+        pData.Free();
+         
+        if (!SupportedVersions.Contains(header.Version))
+        {
+            throw new DataException($"Unsupported version: {header.Version}");
+        }
+
+        m_header = header;
+        m_data = data;
+        m_meshes = new Dictionary<int, QuakeMapMesh[]>();
+
+        m_textures = LoadTextures(palette);
+        m_fullLitLightmap = BuildFullLitLightmap();
+
+        CreateMeshes();
+        CreateEntities();
+    }
+
+    public bool TryFindLeafAt(Vector3 position, int hullId, out int leafId)
+    {
+        var currentNode = GetNode(GetHull(hullId).NodeId0);
+        var foundLeaf = false;
+
+        leafId = -1;
+
+        while (!foundLeaf)
+        {
+            var plane = GetPlane(currentNode.PlaneId);
+            var normal = plane.Normal;
+            // plane equation to determine if we are in front or behind the plane
+            var planeEquality = (normal.X * position.X + normal.Y * position.Y + normal.Z * position.Z) - plane.Dist;
+            var nextNodeId = planeEquality >= 0 ? currentNode.Front : currentNode.Back;
+
+            if (nextNodeId >= 0)
+            {
+                currentNode = GetNode(nextNodeId);
+            }
+            else
+            {
+                leafId = -(nextNodeId + 1);
+                foundLeaf = true;
+            }
+        }
+
+        return foundLeaf;
+    }
+
+    public Span<byte> GetVisibilityList(int id) => m_data.AsSpan(m_header.Visilist.Offset + id);
+
+    public QuakeMapMesh[] GetLeafMeshes(int leafId) => m_meshes[leafId];
+        
+    public int GetHullFirstLeafId(int hullId)
+    {
+        var leafId = 0;
+        
+        for (var h = 0; h < hullId; h++)
+        {
+            leafId += GetHull(h).VisLeafCount;
+        }
+        
+        return leafId;
+    }
+
+    public Hull GetHull(int id) => GetEntry<Hull>(id, m_header.Hulls.Offset);
+
+    public BspLeaf GetLeaf(int id) => GetEntry<BspLeaf>(id, m_header.Leaves.Offset);
+        
+    private BspNode GetNode(int id) => GetEntry<BspNode>(id, m_header.Nodes.Offset);
+
+    private Plane GetPlane(int id) => GetEntry<Plane>(id, m_header.Planes.Offset);
+
+    private Surface GetSurface(int id) => GetEntry<Surface>(id, m_header.Surfaces.Offset);
+
+    private Edge GetEdge(int id) => GetEntry<Edge>(id, m_header.Edges.Offset);
+
+    private Vertex GetVertex(int id) => GetEntry<Vertex>(id, m_header.Vertices.Offset);
+
+    private TextureInfo GetTextureInfo(int id) => GetEntry<TextureInfo>(id, m_header.Texinfo.Offset);
+
+    private unsafe int GetSurfaceId(int listIndex)
+    {
+        fixed (byte* dataPtr = m_data)
+        {
+            var listPtr = (ushort*)(dataPtr + m_header.SurfaceList.Offset);
+
+            return *(listPtr + listIndex);
+        }
+    }
+
+    private unsafe int GetEdgeId(int listIndex)
+    {
+        fixed (byte* dataPtr = m_data)
+        {
+            var listPtr = (int*)(dataPtr + m_header.EdgeList.Offset);
+        
+            return *(listPtr + listIndex);
+        }
+    }
+
+    private unsafe QuakeTexture[] LoadTextures(QuakePalette palette)
+    {
+        fixed (byte* dataPtr = m_data)
+        {
+            var mipHeaderPtr = dataPtr + m_header.Miptex.Offset;
+            var textureCount = *(int*)mipHeaderPtr;
+            var offsets = (int*)(mipHeaderPtr + 4);
+            var textures = new QuakeTexture[textureCount];
+
+            Console.WriteLine($"Texture count: {textureCount}");
+
+            for (var t = 0; t < textureCount; t++)
+            {
+                var texturePtr = mipHeaderPtr + offsets[t];
+                var texture = *(MipTexture*)texturePtr;
+                    
+                var textureName = Marshal.PtrToStringAnsi((IntPtr)texture.Name)!;
+                var rawTextureData = new byte[texture.Width * texture.Height];
+
+                Console.WriteLine($"{textureName} - {texture.Width}x{texture.Height}");
+
+                if (texture.Offset1 == 0)
+                {
+                    throw new NotImplementedException("WAD support is not implemented yet");
+                }
+
+                var textureDataPtr = texturePtr + texture.Offset1;
+                Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);
+                textures[t] = new QuakeTexture(textureName, (int)texture.Width, (int)texture.Height, rawTextureData, palette);
+            }
+
+            return textures;
+        }
+    }
+
+    private void CreateMeshes()
+    {
+        for (var l = 0; l < LeafCount; l++)
+        {
+            var leaf = GetLeaf(l);
+            var leafMeshes = new List<QuakeMapMesh>();
+                
+            for (
+                var sIndex = leaf.SurfaceListIndex;
+                sIndex < leaf.SurfaceListIndex + leaf.SurfaceCount;
+                sIndex++)
+            {
+                var mesh = CreateSurfaceMesh(GetSurfaceId(sIndex));
+
+                leafMeshes.Add(mesh);
+            }
+
+            m_meshes[l] = leafMeshes.ToArray();
+        }
+    }
+        
+    private QuakeMapMesh CreateSurfaceMesh(int surfaceId)
+    {
+        var surface = GetSurface(surfaceId);
+        var vertexCount = surface.EdgeCount;
+        var vertices = new Vector3[vertexCount];
+        var textureInfo = GetTextureInfo(surface.TexinfoId);
+        var texture = m_textures[textureInfo.TexId];
+
+        for (var e = 0; e < surface.EdgeCount; e++)
+        {
+            // var edgeListIndex = surface.EdgeListIndex + (surface.EdgeCount - 1 - e);
+            var edgeListIndex = surface.EdgeListIndex + e;
+            var edgeId = GetEdgeId(edgeListIndex);
+
+            // edgeId can be negative
+            // if edgeId < 0, vertices are in order vertex1 - vertex0
+            // otherwise, they are in order vertex0 - vertex1
+            var edge = GetEdge(edgeId > 0 ? edgeId : -edgeId);
+            var vertex = GetVertex(edgeId > 0 ? edge.Vertex0 : edge.Vertex1);
+
+            vertices[e] = new Vector3(vertex.X, vertex.Y, vertex.Z);
+        }
+
+        QuakeLightmap? lightmap;
+        Vector2[] lightmapUvs;
+            
+        if (surface.Lightmap != -1)
+        {
+            lightmap = BuildLightmap(vertices, textureInfo, surface.Lightmap, out lightmapUvs);
+        }
+        else
+        {
+            lightmap = m_fullLitLightmap;
+            lightmapUvs = new Vector2[vertices.Length];
+        }
+
+        BuildSurfaceVertexData(vertices, lightmapUvs, textureInfo, out var vertexData, out var vertexIndices);
+
+        var mesh = new Mesh(new QuakeSurfaceMeshDataProvider(vertexData, vertexIndices), texture);
+
+        return new QuakeMapMesh(mesh, lightmap);
+    }
+        
+    // fan triangulation from surface convex polygon
+    private void BuildSurfaceVertexData(
+        Vector3[] vertices,
+        Vector2[] lightmapUvs,
+        TextureInfo textureInfo,
+        out float[] vertexData,
+        out uint[] vertexIndices)
+    {
+        // 3 bytes for vertices, 2 bytes of texture coordinates, 2 bytes for lightmap coodinates
+        const int vertexDataLength = 7;
+            
+        var texture = m_textures[textureInfo.TexId];
+        var triangleCount = vertices.Length - 2;
+        var triangleIndex = 0;
+        vertexData = new float[vertices.Length * vertexDataLength];
+        vertexIndices = new uint[triangleCount * 3];
+
+        for (var v = 0; v < vertices.Length; v++)
+        {
+            var vertex = vertices[v];
+            var lightmapUv = lightmapUvs[v];
+            var dataIndex = v * vertexDataLength;
+        
+            // vertex
+            vertexData[dataIndex] = vertex.X;
+            vertexData[dataIndex + 1] = vertex.Y;
+            vertexData[dataIndex + 2] = vertex.Z;
+
+            // texture coordinate
+            var tU = (Vector3.Dot(textureInfo.Snrm, vertex) + textureInfo.Soff) / texture.Width;
+            var tV = (Vector3.Dot(textureInfo.Tnrm, vertex) + textureInfo.Toff) / texture.Height;
+
+            vertexData[dataIndex + 3] = tU;
+            vertexData[dataIndex + 4] = tV;
+
+            // lightmap coordinate
+            vertexData[dataIndex + 5] = lightmapUv.X;
+            vertexData[dataIndex + 6] = lightmapUv.Y;
+        }
+
+        for (uint v = 1; v < vertices.Length - 1; v++, triangleIndex += 3)
+        {
+            vertexIndices[triangleIndex] = 0;
+            vertexIndices[triangleIndex + 1] = v;
+            vertexIndices[triangleIndex + 2] = v + 1;
+        }
+    }
+
+    private QuakeLightmap BuildLightmap(
+        Vector3[] vertices,
+        TextureInfo textureInfo,
+        int lightmapId,
+        out Vector2[] uvs)
+    {
+        unsafe
+        {
+            var planeProjectedVertices = vertices
+                .Select(v => new Vector2(Vector3.Dot(textureInfo.Snrm, v), Vector3.Dot(textureInfo.Tnrm, v)))
+                .ToArray();
+            var minU = planeProjectedVertices.Select(v => v.X).Min();
+            var maxU = planeProjectedVertices.Select(v => v.X).Max();
+            var minV = planeProjectedVertices.Select(v => v.Y).Min();
+            var maxV = planeProjectedVertices.Select(v => v.Y).Max();
+            var boundingRect = new Vector2((float)Math.Ceiling(maxU - minU), (float)Math.Ceiling(maxV - minV));
+            var textureWidth = (int)Math.Clamp(boundingRect.X / 16, 1, 16);
+            var textureHeight = (int)Math.Clamp(boundingRect.Y / 16, 1, 16);
+            var data = new byte[textureWidth * textureHeight];
+
+            uvs = planeProjectedVertices.Select(uv =>
+                new Vector2((uv.X - minU) / boundingRect.X, (uv.Y - minV) / boundingRect.Y)).ToArray();
+            
+            fixed (byte* dataPtr = m_data)
+            {
+                var lightmapPtr = dataPtr + m_header.Lightmaps.Offset + lightmapId;
+
+                for (var i = 0; i < data.Length; i++)
+                {
+                    data[i] = lightmapPtr[i];
+                }
+            }
+
+            return new QuakeLightmap(textureWidth, textureHeight, data);
+        }
+    }
+
+    private QuakeLightmap BuildFullLitLightmap()
+    {
+        var fullLitData = new byte[16 * 16];
+                        
+        Array.Fill(fullLitData, (byte)255);
+        return new QuakeLightmap(16, 16, fullLitData);
+    }
+
+    private unsafe void CreateEntities()
+    {
+        fixed (byte *dataPtr = m_data)
+        {
+            var entitiesPtr = (char *)(dataPtr + m_header.Entities.Offset);
+            var entitiesStr = Marshal.PtrToStringAnsi((IntPtr)entitiesPtr)!;
+                
+            // TODO
+        }
+    }
+
+    private unsafe T GetEntry<T>(int id, int entryOffset)
+    {
+        fixed (byte* dataPtr = m_data)
+        {
+            var offset = entryOffset + (id * sizeof(T));
+
+            return *(T *)(dataPtr + offset);
+        }
+    }
+}

@@ -11,9 +11,9 @@ public class RenderSystem
     private readonly System<TransformComponent, MeshComponent,ShaderComponent> m_system;
     private Matrix4 m_viewMatrix;
     private Matrix4 m_projectionMatrix;
-    private readonly QuakeMapLoader.Map m_map;
+    private readonly QuakeMap m_map;
 
-    public RenderSystem(World world, QuakeMapLoader.Map map)
+    public RenderSystem(World world, QuakeMap map)
     {
         m_system = world
             .System<TransformComponent, MeshComponent, ShaderComponent>()
