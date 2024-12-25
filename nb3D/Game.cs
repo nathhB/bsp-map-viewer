@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Flecs.NET.Core;
 using nb3D.Components;
+using nb3D.Map;
 using nb3D.Systems;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
@@ -20,13 +21,14 @@ public class Game : GameWindow
     private Shader m_shader = null!;
     private Shader m_shader2 = null!;
     private Shader m_shader3 = null!;
+    private Shader m_mapShader;
     private Mesh m_planeMesh = null!;
     private Mesh m_cubeMesh = null!;
     private RenderSystem m_renderSystem;
     private readonly FreeFlyCameraSystem m_freeFlyCameraSystem;
     private readonly RotateSystem m_rotateSystem;
     private readonly QuakeMapLoader.Map m_map;
-    private Stopwatch m_frameTimeStopwatch = new Stopwatch();
+    private readonly Stopwatch m_frameTimeStopwatch = new Stopwatch();
 
     public Game(int width, int height, string title) :
         base(GameWindowSettings.Default,
@@ -34,7 +36,7 @@ public class Game : GameWindow
     {
         m_defaultPipeline = m_world.Pipeline().With(Ecs.System).Build();
         m_renderPipeline = m_world.Pipeline().With(Ecs.System).With<RenderKind>().Build();
-        m_map = QuakeMapLoader.Load("Assets/Maps/start.bsp", "Assets/Maps/palette.lmp");
+        m_map = QuakeMapLoader.Load("Assets/Maps/de_dust2.bsp", "Assets/Maps/palette.lmp");
         m_freeFlyCameraSystem = new FreeFlyCameraSystem(m_world, KeyboardState);
         m_rotateSystem = new RotateSystem(m_world);
     }
@@ -54,7 +56,7 @@ public class Game : GameWindow
         CreateCube(new Vector3(3, 10, 0));
         CreateCube(new Vector3(-3, 10, 0));*/
 
-        m_renderSystem = new RenderSystem(m_world, m_map, m_shader2);
+        m_renderSystem = new RenderSystem(m_world, m_map);
     }
 
     protected override void OnUnload()
@@ -77,7 +79,7 @@ public class Game : GameWindow
         
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-        m_renderSystem.RenderMap(m_world.Lookup("Camera"), m_shader2);
+        m_renderSystem.RenderMap(m_world.Lookup("Camera"), m_mapShader);
         m_world.SetPipeline(m_renderPipeline);
         m_world.Progress();
 
@@ -128,6 +130,7 @@ public class Game : GameWindow
         m_shader = Shader.CompileFromFiles("Assets/Shaders/shader.vert", "Assets/Shaders/shader.frag");
         m_shader2 = Shader.CompileFromFiles("Assets/Shaders/shader2.vert", "Assets/Shaders/shader2.frag");
         m_shader3 = Shader.CompileFromFiles("Assets/Shaders/shader3.vert", "Assets/Shaders/shader3.frag");
+        m_mapShader = Shader.CompileFromFiles("Assets/Shaders/mapShader.vert", "Assets/Shaders/mapShader.frag");
     }
    
     private void LoadMeshes()
@@ -135,7 +138,7 @@ public class Game : GameWindow
         var cubeDef = WavefrontImporter.Import("Assets/Models/cube3.obj", "Assets/Models/cube3.mtl");
         // var planeDef = WavefrontImporter.Import("Assets/Models/plane.obj", "Assets/Models/plane.mtl");
 
-        m_cubeMesh = MeshBuilder.Build(cubeDef);
+        // m_cubeMesh = MeshBuilder.Build(cubeDef);
         /*m_planeMesh = MeshBuilder.BuildFromConvexPolygon(new[]
         {
             new Vector3(608, 0, 176),

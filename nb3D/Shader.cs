@@ -36,6 +36,9 @@ public class Shader(string vertexData, string fragmentData)
 
         switch (value)
         {
+            case int i:
+                SetUniform(location, i);
+                break;
             case Vector4 vec4:
                 SetUniform(location, vec4);
                 break;
@@ -52,6 +55,11 @@ public class Shader(string vertexData, string fragmentData)
             default:
                 throw new InvalidOperationException($"Unsupported uniform type: {typeof(T)} (uniform: {name})");
         }
+    }
+
+    private void SetUniform(int location, int value)
+    {
+        GL.Uniform1(location, value);
     }
 
     private void SetUniform(int location, Color4 color)

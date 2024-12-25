@@ -1,4 +1,4 @@
-namespace nb3D;
+namespace nb3D.Map;
 
 public class QuakePalette
 {

@@ -1,7 +1,7 @@
 using OpenTK.Graphics.OpenGL4;
 using GL = OpenTK.Graphics.OpenGL4.GL;
 
-namespace nb3D;
+namespace nb3D.Map;
 
 public class QuakeTexture : IMeshTexture
 {
@@ -10,7 +10,6 @@ public class QuakeTexture : IMeshTexture
     public string Name { get; }
     public int Width { get; }
     public int Height { get; }
-    public int DataLength => 2;
 
     public QuakeTexture(string name, int width, int height, byte[] rawTextureData, QuakePalette palette)
     {
@@ -38,15 +37,6 @@ public class QuakeTexture : IMeshTexture
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
         
         GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
-    }
-
-    public void SetVertexAttributes(int vertexDataLength)
-    {
-        var stride = (vertexDataLength + DataLength) * sizeof(float);
-        var offset = vertexDataLength * sizeof(float);
-        
-        GL.VertexAttribPointer(1, DataLength, VertexAttribPointerType.Float, false, stride, offset);
-        GL.EnableVertexAttribArray(1);
     }
 
     public void Use(TextureUnit targetUnit)

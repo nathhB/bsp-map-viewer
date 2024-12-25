@@ -1,5 +1,6 @@
 using Flecs.NET.Core;
 using nb3D.Components;
+using nb3D.Map;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
@@ -12,7 +13,7 @@ public class RenderSystem
     private Matrix4 m_projectionMatrix;
     private readonly QuakeMapLoader.Map m_map;
 
-    public RenderSystem(World world, QuakeMapLoader.Map map, Shader mapShader)
+    public RenderSystem(World world, QuakeMapLoader.Map map)
     {
         m_system = world
             .System<TransformComponent, MeshComponent, ShaderComponent>()
@@ -44,6 +45,13 @@ public class RenderSystem
 
         m_viewMatrix = ComputeViewMatrix(cameraTransform, cameraComponent);
         m_projectionMatrix = ComputeProjectionMatrix(cameraComponent);
+        
+        shader.Use();
+        shader.SetUniform("texture0", 0);
+        shader.SetUniform("texture1", 1); // used for lightmaps
+        shader.SetUniform("modelMatrix", Matrix4.Identity);
+        shader.SetUniform("viewMatrix", m_viewMatrix);
+        shader.SetUniform("projectionMatrix", m_projectionMatrix);
 
         const bool ignoreVisibilityList = false;
 
@@ -51,12 +59,13 @@ public class RenderSystem
         {
             for (var h = 0; h < m_map.HullCount; h++)
             {
-                RenderCompleteHull(h, shader);
+                RenderCompleteHull(h);
             }
         }
         else
         {
-            for (var h = 0; h < m_map.HullCount; h++)
+            // for (var h = 0; h < m_map.HullCount; h++)
+            for (var h = 0; h < 1; h++)
             {
                 var hull = m_map.GetHull(h);
 
@@ -72,17 +81,17 @@ public class RenderSystem
 
                 if (leaf.VisList == -1)
                 {
-                    RenderCompleteHull(h, shader);
+                    RenderCompleteHull(h);
                 }
                 else
                 {
-                    RenderLeafVisibilityList(leafId, hull.VisLeafCount, shader);
+                    RenderLeafVisibilityList(leafId, hull.VisLeafCount);
                 }
             }
         }
     }
 
-    private void RenderLeafVisibilityList(int mainLeafId, int leafCount, Shader shader)
+    private void RenderLeafVisibilityList(int mainLeafId, int leafCount)
     {
         var mainLeaf = m_map.GetLeaf(mainLeafId);
         var visList = m_map.GetVisibilityList(mainLeaf.VisList);
@@ -104,38 +113,35 @@ public class RenderSystem
 
                     if ((visMask & bit) > 0)
                     {
-                        RenderLeaf(leafId, shader);
+                        RenderLeaf(leafId);
                     }
                 }
             }
         }
     }
 
-    private void RenderCompleteHull(int hullId, Shader shader)
+    private void RenderCompleteHull(int hullId)
     {
         var hull = m_map.GetHull(hullId);
         var leafId = m_map.GetHullFirstLeafId(hullId);
 
         for (var l = leafId; l < leafId + hull.VisLeafCount; l++)
         {
-            RenderLeaf(l, shader);
+            RenderLeaf(l);
         }
     }
 
-    private void RenderLeaf(int leafId, Shader shader)
+    private void RenderLeaf(int leafId)
     {
-        var meshes = m_map.GetLeafMeshes(leafId);
+        var surfaceMeshes = m_map.GetLeafMeshes(leafId);
 
-        foreach (var mesh in meshes)
+        foreach (var surfaceMesh in surfaceMeshes)
         {
-            mesh.Bind();
+            var lightmap = surfaceMesh.Lightmap;
 
-            shader.Use();
-            shader.SetUniform("modelMatrix", Matrix4.Identity);
-            shader.SetUniform("viewMatrix", m_viewMatrix);
-            shader.SetUniform("projectionMatrix", m_projectionMatrix);
-            
-            GL.DrawElements(PrimitiveType.TriangleFan, mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
+            surfaceMesh.Mesh.Bind();
+            lightmap.Use(TextureUnit.Texture1);
+            GL.DrawElements(PrimitiveType.TriangleFan, surfaceMesh.Mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
         }
     }
 

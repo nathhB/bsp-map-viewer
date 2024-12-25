@@ -8,41 +8,32 @@ public class Mesh : IDisposable
     private readonly int m_vbo;
     private readonly int m_ebo;
     private readonly IMeshTexture? m_texture;
+    private readonly uint[] m_vertexIndices;
 
-    public int VertexCount { get; }
+    public int VertexCount => m_vertexIndices.Length;
 
-    public Mesh(float[] vertices, uint[] faceVertexIndices, IMeshTexture? texture = null)
+    public Mesh(IMeshDataProvider dataProvider, IMeshTexture? texture = null)
     {
-        VertexCount = faceVertexIndices.Length;
+        m_vertexIndices = dataProvider.VertexIndices;
         m_texture = texture;
 
         // Vertex buffer
         m_vbo = GL.GenBuffer();
                     
         GL.BindBuffer(BufferTarget.ArrayBuffer, m_vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
+        dataProvider.BuildBufferData();
                             
         // Vertex array
         m_vao = GL.GenVertexArray();
                     
         GL.BindVertexArray(m_vao);
-
-        const int vertexDataLength = 3;
-        var textureDataLength = m_texture?.DataLength ?? 0;
-
-        // vertices data
-        var stride = (vertexDataLength + textureDataLength) * sizeof(float);
-
-        GL.VertexAttribPointer(0, vertexDataLength, VertexAttribPointerType.Float, false, stride, 0);
-        GL.EnableVertexAttribArray(0);
-        
-        m_texture?.SetVertexAttributes(vertexDataLength);
+        dataProvider.BuildVertexData();
 
         // Element buffer object
         m_ebo = GL.GenBuffer();
 
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, m_ebo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer, faceVertexIndices.Length * sizeof(uint), faceVertexIndices, BufferUsageHint.StaticDraw);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, m_vertexIndices.Length * sizeof(uint), m_vertexIndices, BufferUsageHint.StaticDraw);
     }
 
     public void Bind()

@@ -41,7 +41,8 @@ public static class MeshBuilder
 
         var arrayTexture = meshDef.Materials.Count > 0 ? BuildArrayTexture(meshDef) : null;
 
-        return new Mesh(vertices, faceVertexIndices, arrayTexture);
+        // return new Mesh(vertices, faceVertexIndices, arrayTexture);
+        return null;
     }
 
     private static ArrayTexture? BuildArrayTexture(MeshDef meshDef)
