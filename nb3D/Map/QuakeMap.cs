@@ -1,4 +1,5 @@
 using System.Data;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using OpenTK.Mathematics;
 
@@ -11,7 +12,7 @@ namespace nb3D.Map;
  *      https://developer.valvesoftware.com/wiki/BSP_(GoldSrc)
  *
  * Support BSP29 and BSP30 (GoldSrc)
- * 
+ *
  * IMPORTANT: long are converted to integers !!
  */
 public partial class QuakeMap
@@ -95,7 +96,7 @@ public partial class QuakeMap
         public byte Lightstyle1;
         public byte Lightstyle2;
         public byte Lightstyle3;
-        public int Lightmap;         // Offset to the lightmap or -1
+        public int LightmapOffset;  // Offset to the lightmap or -1
     }
     
     private struct Edge
@@ -160,13 +161,16 @@ public partial class QuakeMap
         public Entry EdgeList;
         public Entry Hulls;
     }
-    
-    private static readonly int[] SupportedVersions = { 29, 30 };
+
+    private const int BSP29 = 29;
+    private const int BSP30 = 30;
+    private static readonly int[] SupportedVersions = { BSP29, BSP30 };
     private readonly Header m_header;
     private readonly byte[] m_data;
-    private readonly Dictionary<int, QuakeMapMesh[]> m_meshes;
-    private readonly QuakeTexture[] m_textures;
-    private readonly QuakeLightmap m_fullLitLightmap;
+    private readonly Dictionary<int, QuakeMapMesh[]> m_meshes = new();
+    private readonly Dictionary<int, QuakeTexture> m_textures = new();
+    private readonly QuakePalette m_palette;
+    private readonly WAD3[] m_wads;
 
     public unsafe int PlaneCount => m_header.Planes.Size / sizeof(Plane);
     public unsafe int NodeCount => m_header.Nodes.Size / sizeof(BspNode);
@@ -175,8 +179,9 @@ public partial class QuakeMap
     public unsafe int HullCount => m_header.Hulls.Size / sizeof(Hull);
     public unsafe int TextureInfoCount => m_header.Texinfo.Size / sizeof(TextureInfo);
     public unsafe int LightMapCount => m_header.Lightmaps.Size / sizeof(TextureInfo);
+    public QuakeLightmap FullLitLightmap { get; }
 
-    public QuakeMap(byte[] data, QuakePalette palette)
+    public QuakeMap(byte[] data, QuakePalette palette, WAD3[] wads)
     {
         var pData = GCHandle.Alloc(data, GCHandleType.Pinned);
         var header = (Header)Marshal.PtrToStructure(pData.AddrOfPinnedObject(), typeof(Header))!;
@@ -189,12 +194,12 @@ public partial class QuakeMap
 
         m_header = header;
         m_data = data;
-        m_meshes = new Dictionary<int, QuakeMapMesh[]>();
+        m_palette = palette;
+        m_wads = wads;
+        FullLitLightmap = BuildFullLitLightmap(m_header.Version > BSP29);
 
-        m_textures = LoadTextures(palette);
-        m_fullLitLightmap = BuildFullLitLightmap();
-
-        CreateMeshes();
+        LoadTextures();
+        LoadMeshes();
         CreateEntities();
     }
 
@@ -279,14 +284,13 @@ public partial class QuakeMap
         }
     }
 
-    private unsafe QuakeTexture[] LoadTextures(QuakePalette palette)
+    private unsafe void LoadTextures()
     {
         fixed (byte* dataPtr = m_data)
         {
             var mipHeaderPtr = dataPtr + m_header.Miptex.Offset;
             var textureCount = *(int*)mipHeaderPtr;
             var offsets = (int*)(mipHeaderPtr + 4);
-            var textures = new QuakeTexture[textureCount];
 
             Console.WriteLine($"Texture count: {textureCount}");
 
@@ -294,27 +298,37 @@ public partial class QuakeMap
             {
                 var texturePtr = mipHeaderPtr + offsets[t];
                 var texture = *(MipTexture*)texturePtr;
-                    
                 var textureName = Marshal.PtrToStringAnsi((IntPtr)texture.Name)!;
-                var rawTextureData = new byte[texture.Width * texture.Height];
 
                 Console.WriteLine($"{textureName} - {texture.Width}x{texture.Height}");
 
+                QuakeTexture? quakeTexture;
+
                 if (texture.Offset1 == 0)
                 {
-                    throw new NotImplementedException("WAD support is not implemented yet");
+                    if (!TryFindTextureInWADs(textureName, out quakeTexture))
+                    {
+                        Console.WriteLine($"Failed to find texture '{textureName}' in data, missing a WAD file?");
+                    }
+                }
+                else
+                {
+                    var textureDataPtr = texturePtr + texture.Offset1;
+                    var rawTextureData = new byte[texture.Width * texture.Height];
+
+                    Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);    
+                    quakeTexture = new QuakeTexture(textureName, (int)texture.Width, (int)texture.Height, rawTextureData, m_palette);
                 }
 
-                var textureDataPtr = texturePtr + texture.Offset1;
-                Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);
-                textures[t] = new QuakeTexture(textureName, (int)texture.Width, (int)texture.Height, rawTextureData, palette);
+                if (quakeTexture != null)
+                {
+                    m_textures[t] = quakeTexture;
+                }
             }
-
-            return textures;
         }
     }
 
-    private void CreateMeshes()
+    private void LoadMeshes()
     {
         for (var l = 0; l < LeafCount; l++)
         {
@@ -326,22 +340,29 @@ public partial class QuakeMap
                 sIndex < leaf.SurfaceListIndex + leaf.SurfaceCount;
                 sIndex++)
             {
-                var mesh = CreateSurfaceMesh(GetSurfaceId(sIndex));
+                if (TryCreateSurfaceMesh(GetSurfaceId(sIndex), out var mapMesh))
+                {
+                    leafMeshes.Add(mapMesh!);
+                }
 
-                leafMeshes.Add(mesh);
             }
 
             m_meshes[l] = leafMeshes.ToArray();
         }
     }
         
-    private QuakeMapMesh CreateSurfaceMesh(int surfaceId)
+    private bool TryCreateSurfaceMesh(int surfaceId, out QuakeMapMesh? mapMesh)
     {
         var surface = GetSurface(surfaceId);
         var vertexCount = surface.EdgeCount;
         var vertices = new Vector3[vertexCount];
         var textureInfo = GetTextureInfo(surface.TexinfoId);
-        var texture = m_textures[textureInfo.TexId];
+
+        if (!m_textures.TryGetValue(textureInfo.TexId, out var texture))
+        {
+            mapMesh = null;
+            return false;
+        }
 
         for (var e = 0; e < surface.EdgeCount; e++)
         {
@@ -361,21 +382,24 @@ public partial class QuakeMap
         QuakeLightmap? lightmap;
         Vector2[] lightmapUvs;
             
-        if (surface.Lightmap != -1)
+        if (surface.LightmapOffset != -1 /*&& GetPlane(surface.PlaneId).Type == 1*/)
         {
-            lightmap = BuildLightmap(vertices, textureInfo, surface.Lightmap, out lightmapUvs);
+            var rgb = m_header.Version > BSP29;
+
+            lightmap = BuildLightmap(vertices, textureInfo, surface.LightmapOffset, rgb, out lightmapUvs);
         }
         else
         {
-            lightmap = m_fullLitLightmap;
+            lightmap = FullLitLightmap;
             lightmapUvs = new Vector2[vertices.Length];
         }
 
         BuildSurfaceVertexData(vertices, lightmapUvs, textureInfo, out var vertexData, out var vertexIndices);
 
         var mesh = new Mesh(new QuakeSurfaceMeshDataProvider(vertexData, vertexIndices), texture);
+        mapMesh = new QuakeMapMesh(mesh, lightmap);
 
-        return new QuakeMapMesh(mesh, lightmap);
+        return true;
     }
         
     // fan triangulation from surface convex polygon
@@ -429,29 +453,39 @@ public partial class QuakeMap
     private QuakeLightmap BuildLightmap(
         Vector3[] vertices,
         TextureInfo textureInfo,
-        int lightmapId,
+        int lightmapOffset,
+        bool rgb,
         out Vector2[] uvs)
     {
         unsafe
         {
-            var planeProjectedVertices = vertices
-                .Select(v => new Vector2(Vector3.Dot(textureInfo.Snrm, v), Vector3.Dot(textureInfo.Tnrm, v)))
-                .ToArray();
-            var minU = planeProjectedVertices.Select(v => v.X).Min();
-            var maxU = planeProjectedVertices.Select(v => v.X).Max();
-            var minV = planeProjectedVertices.Select(v => v.Y).Min();
-            var maxV = planeProjectedVertices.Select(v => v.Y).Max();
-            var boundingRect = new Vector2((float)Math.Ceiling(maxU - minU), (float)Math.Ceiling(maxV - minV));
-            var textureWidth = (int)Math.Clamp(boundingRect.X / 16, 1, 16);
-            var textureHeight = (int)Math.Clamp(boundingRect.Y / 16, 1, 16);
-            var data = new byte[textureWidth * textureHeight];
+            uvs = vertices
+                .Select(v => new Vector2(
+                    Vector3.Dot(textureInfo.Snrm, v) + textureInfo.Soff,
+                    Vector3.Dot(textureInfo.Tnrm, v) + textureInfo.Toff)
+                ).ToArray();
+            var minU = uvs.Select(v => v.X).Min();
+            var maxU = uvs.Select(v => v.X).Max();
+            var minV = uvs.Select(v => v.Y).Min();
+            var maxV = uvs.Select(v => v.Y).Max();
+            var lightmapWidth = (int)Math.Ceiling((maxU - minU) / 16);
+            var lightmapHeight = (int)Math.Ceiling((maxV - minV) / 16);
 
-            uvs = planeProjectedVertices.Select(uv =>
-                new Vector2((uv.X - minU) / boundingRect.X, (uv.Y - minV) / boundingRect.Y)).ToArray();
+            if (lightmapWidth > 16 || lightmapHeight > 16)
+            {
+                throw new DataException($"Invalid lightmap size: {lightmapWidth}x{lightmapHeight}");
+            }
             
+            var channelCount = rgb ? 3 : 1;
+            var data = new byte[lightmapWidth * lightmapHeight * channelCount];
+
+            /*uvs = uvs
+                .Select(uv => new Vector2((uv.X - minU) / (maxU - minU), (uv.Y - minV) / (maxV - minV)))
+                .ToArray();*/
+
             fixed (byte* dataPtr = m_data)
             {
-                var lightmapPtr = dataPtr + m_header.Lightmaps.Offset + lightmapId;
+                var lightmapPtr = dataPtr + m_header.Lightmaps.Offset + lightmapOffset;
 
                 for (var i = 0; i < data.Length; i++)
                 {
@@ -459,16 +493,17 @@ public partial class QuakeMap
                 }
             }
 
-            return new QuakeLightmap(textureWidth, textureHeight, data);
+            return new QuakeLightmap(lightmapWidth, lightmapHeight, data, rgb);
         }
     }
 
-    private QuakeLightmap BuildFullLitLightmap()
+    private QuakeLightmap BuildFullLitLightmap(bool rgb)
     {
-        var fullLitData = new byte[16 * 16];
+        var channelCount = rgb ? 3 : 1;
+        var fullLitData = new byte[16 * 16 * channelCount];
                         
         Array.Fill(fullLitData, (byte)255);
-        return new QuakeLightmap(16, 16, fullLitData);
+        return new QuakeLightmap(16, 16, fullLitData, rgb);
     }
 
     private unsafe void CreateEntities()
@@ -490,5 +525,19 @@ public partial class QuakeMap
 
             return *(T *)(dataPtr + offset);
         }
+    }
+
+    private bool TryFindTextureInWADs(string name, out QuakeTexture? texture)
+    {
+        foreach (var wad in m_wads)
+        {
+            if (wad.Textures.TryGetValue(name, out texture))
+            {
+                return true;
+            }
+        }
+
+        texture = null;
+        return false;
     }
 }

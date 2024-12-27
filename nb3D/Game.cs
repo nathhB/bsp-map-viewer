@@ -36,7 +36,11 @@ public class Game : GameWindow
     {
         m_defaultPipeline = m_world.Pipeline().With(Ecs.System).Build();
         m_renderPipeline = m_world.Pipeline().With(Ecs.System).With<RenderKind>().Build();
-        m_map = QuakeMapLoader.Load("Assets/Maps/de_dust2.bsp", "Assets/Maps/palette.lmp");
+        m_map = QuakeMapLoader.Load(
+            "Assets/Maps/start.bsp",
+            "Assets/Maps/palette.lmp",
+            "Assets/WADs/cs_dust.wad",
+            "Assets/WADs/halflife.wad");
         m_freeFlyCameraSystem = new FreeFlyCameraSystem(m_world, KeyboardState);
         m_rotateSystem = new RotateSystem(m_world);
     }

@@ -6,35 +6,14 @@ public class QuakePalette
 
     public static QuakePalette Load(string path)
     {
-        using var stream = File.OpenRead(path);
-        var buffer = new byte[stream.Length];
-        var bytesToRead = stream.Length;
-        var totalReadBytes = 0;
-        
-        while (bytesToRead > 0)
-        {
-            var readBytes = stream.Read(buffer, totalReadBytes, (int)bytesToRead);
-        
-            if (readBytes == 0)
-            {
-                break;
-            }
-                    
-            bytesToRead -= readBytes;
-            totalReadBytes += readBytes;
-        }
-        
-        if (totalReadBytes != stream.Length)
-        {
-            throw new IOException($"Failed to read palette file: {path}");
-        }
+        var data = File.ReadAllBytes(path);
 
-        return new QuakePalette(buffer);
+        return new QuakePalette(data);
     }
 
     private readonly QuakeColor[] m_colors = new QuakeColor[256];
 
-    private QuakePalette(byte[] data)
+    public QuakePalette(byte[] data)
     {
         for (var i = 0; i < 256; i++)
         {

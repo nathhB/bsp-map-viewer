@@ -11,7 +11,7 @@ public class QuakeLightmap : IMeshTexture
     public int Width { get; }
     public int Height { get; }
 
-    public QuakeLightmap(int width, int height, byte[] rawLightmapData)
+    public QuakeLightmap(int width, int height, byte[] rawLightmapData, bool rgb)
     {
         Width = width;
         Height = height;
@@ -28,7 +28,7 @@ public class QuakeLightmap : IMeshTexture
             0,
             PixelFormat.Rgb,
             PixelType.UnsignedByte,
-            BuildTexturePixels(rawLightmapData));
+            BuildTexturePixels(rawLightmapData, rgb));
 
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
@@ -50,19 +50,29 @@ public class QuakeLightmap : IMeshTexture
         GL.DeleteTexture(m_handle);
     }
 
-    public bool ContainsFullDark() => m_rawLightmapData.Any(b => b == 0);
+    public bool ContainsBlack() => m_rawLightmapData.Any(b => b == 0);
 
-    private byte[] BuildTexturePixels(byte[] rawLightmapData)
+    private byte[] BuildTexturePixels(byte[] rawLightmapData, bool rgb)
     {
         var pixels = new byte[Width * Height * 3];
-    
-        for (var i = 0; i < rawLightmapData.Length; i++)
+
+        if (rgb)
         {
-            pixels[i * 3] = rawLightmapData[i];
-            pixels[i * 3 + 1] = rawLightmapData[i];
-            pixels[i * 3 + 2] = rawLightmapData[i];
+            for (var i = 0; i < rawLightmapData.Length; i++)
+            {
+                pixels[i] = rawLightmapData[i];
+            }
         }
-    
+        else
+        {
+            for (var i = 0; i < rawLightmapData.Length; i++)
+            {
+                pixels[i * 3] = rawLightmapData[i];
+                pixels[i * 3 + 1] = rawLightmapData[i];
+                pixels[i * 3 + 2] = rawLightmapData[i];
+            }
+        }
+
         return pixels;
     }
 }

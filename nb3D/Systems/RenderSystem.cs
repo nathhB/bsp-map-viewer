@@ -54,12 +54,13 @@ public class RenderSystem
         shader.SetUniform("projectionMatrix", m_projectionMatrix);
 
         const bool ignoreVisibilityList = false;
+        const bool enableLightmaps = true;
 
         if (ignoreVisibilityList)
         {
             for (var h = 0; h < m_map.HullCount; h++)
             {
-                RenderCompleteHull(h);
+                RenderCompleteHull(h, enableLightmaps);
             }
         }
         else
@@ -81,17 +82,17 @@ public class RenderSystem
 
                 if (leaf.VisList == -1)
                 {
-                    RenderCompleteHull(h);
+                    RenderCompleteHull(h, enableLightmaps);
                 }
                 else
                 {
-                    RenderLeafVisibilityList(leafId, hull.VisLeafCount);
+                    RenderLeafVisibilityList(leafId, hull.VisLeafCount, enableLightmaps);
                 }
             }
         }
     }
 
-    private void RenderLeafVisibilityList(int mainLeafId, int leafCount)
+    private void RenderLeafVisibilityList(int mainLeafId, int leafCount, bool enableLightmaps)
     {
         var mainLeaf = m_map.GetLeaf(mainLeafId);
         var visList = m_map.GetVisibilityList(mainLeaf.VisList);
@@ -113,31 +114,31 @@ public class RenderSystem
 
                     if ((visMask & bit) > 0)
                     {
-                        RenderLeaf(leafId);
+                        RenderLeaf(leafId, enableLightmaps);
                     }
                 }
             }
         }
     }
 
-    private void RenderCompleteHull(int hullId)
+    private void RenderCompleteHull(int hullId, bool enableLightmaps)
     {
         var hull = m_map.GetHull(hullId);
         var leafId = m_map.GetHullFirstLeafId(hullId);
 
         for (var l = leafId; l < leafId + hull.VisLeafCount; l++)
         {
-            RenderLeaf(l);
+            RenderLeaf(l, enableLightmaps);
         }
     }
 
-    private void RenderLeaf(int leafId)
+    private void RenderLeaf(int leafId, bool enableLightmaps)
     {
         var surfaceMeshes = m_map.GetLeafMeshes(leafId);
 
         foreach (var surfaceMesh in surfaceMeshes)
         {
-            var lightmap = surfaceMesh.Lightmap;
+            var lightmap = enableLightmaps ? surfaceMesh.Lightmap : m_map.FullLitLightmap;
 
             surfaceMesh.Mesh.Bind();
             lightmap.Use(TextureUnit.Texture1);
