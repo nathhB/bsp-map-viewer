@@ -4,58 +4,71 @@ using nb3D.Map;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
-namespace nb3D.Systems;
+namespace nb3D;
 
-public class RenderSystem
+public class SceneRenderer
 {
-    private readonly System<TransformComponent, MeshComponent,ShaderComponent> m_system;
+    private readonly Query<TransformComponent,MeshComponent,ShaderComponent> m_renderableEntitiesQuery;
+    private readonly World m_world;
+    private readonly QuakeMap m_map;
+    private readonly Shader m_mapShader;
     private Matrix4 m_viewMatrix;
     private Matrix4 m_projectionMatrix;
-    private readonly QuakeMap m_map;
 
-    public RenderSystem(World world, QuakeMap map)
+    public SceneRenderer(World world, QuakeMap map, Shader mapShader)
     {
-        m_system = world
-            .System<TransformComponent, MeshComponent, ShaderComponent>()
-            .Kind<Game.RenderKind>()
-            .Run((Iter it, Action<Iter> callback) =>
-            {
-                var camera = world.Lookup("Camera");
-
-                if (!camera.IsValid()) return;
-
-                var cameraTransform = camera.Get<TransformComponent>();
-                var cameraComponent = camera.Get<CameraComponent>();
-                m_viewMatrix = ComputeViewMatrix(cameraTransform, cameraComponent);
-                m_projectionMatrix = ComputeProjectionMatrix(cameraComponent);
-
-                while (it.Next())
-                {
-                    callback(it);
-                }
-            })
-            .Each(RenderEntity);
+        m_world = world;
         m_map = map;
+        m_mapShader = mapShader;
+        m_renderableEntitiesQuery = world.QueryBuilder<TransformComponent, MeshComponent, ShaderComponent>()
+            .Cached()
+            .Build();
     }
-
-    public void RenderMap(Entity camera, Shader shader)
+    
+    public void Render()
     {
+        var camera = m_world.Lookup("Camera");
+        
+        if (!camera.IsValid()) return;
+        
         var cameraTransform = camera.Get<TransformComponent>();
         var cameraComponent = camera.Get<CameraComponent>();
-
         m_viewMatrix = ComputeViewMatrix(cameraTransform, cameraComponent);
         m_projectionMatrix = ComputeProjectionMatrix(cameraComponent);
-        
-        shader.Use();
-        shader.SetUniform("texture0", 0);
-        shader.SetUniform("texture1", 1); // used for lightmaps
-        shader.SetUniform("modelMatrix", Matrix4.Identity);
-        shader.SetUniform("viewMatrix", m_viewMatrix);
-        shader.SetUniform("projectionMatrix", m_projectionMatrix);
 
+        RenderMap(camera);
+        m_renderableEntitiesQuery.Each(RenderEntity);
+    }
+
+    private void RenderEntity(
+        Entity entity,
+        ref TransformComponent transformComp,
+        ref MeshComponent meshComp,
+        ref ShaderComponent shaderComp)
+    {
+        shaderComp.Shader.Use();
+        shaderComp.Shader.SetUniform("modelMatrix", transformComp.ComputeMatrix());
+        shaderComp.Shader.SetUniform("viewMatrix", m_viewMatrix);
+        shaderComp.Shader.SetUniform("projectionMatrix", m_projectionMatrix);
+            
+        meshComp.Mesh.Bind();
+        GL.DrawElements(PrimitiveType.Triangles, meshComp.Mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
+    }
+    
+    private void RenderMap(Entity camera)
+    {
+        var cameraTransform = camera.Get<TransformComponent>();
+    
+        m_mapShader.Use();
+        m_mapShader.SetUniform("texture0", 0);
+        m_mapShader.SetUniform("texture1", 1); // used for lightmaps
+        m_mapShader.SetUniform("modelMatrix", Matrix4.Identity);
+        m_mapShader.SetUniform("viewMatrix", m_viewMatrix);
+        m_mapShader.SetUniform("projectionMatrix", m_projectionMatrix);
+    
         const bool ignoreVisibilityList = false;
-        const bool enableLightmaps = true;
-
+        const bool enableLightmaps = false;
+    
         if (ignoreVisibilityList)
         {
             for (var h = 0; h < m_map.HullCount; h++)
@@ -69,17 +82,17 @@ public class RenderSystem
             for (var h = 0; h < 1; h++)
             {
                 var hull = m_map.GetHull(h);
-
+    
                 if (!m_map.TryFindLeafAt(cameraTransform.Position, h, out var leafId))
                 {
                     Console.WriteLine("Could not find leaf !");
                     continue;
                 }
-
+    
                 // Console.WriteLine($"Hull {h} ({hull.VisLeafCount}) => {m_map.GetLeaf(leafId).VisList}");
-
+    
                 var leaf = m_map.GetLeaf(leafId);
-
+    
                 if (leaf.VisList == -1)
                 {
                     RenderCompleteHull(h, enableLightmaps);
@@ -91,13 +104,13 @@ public class RenderSystem
             }
         }
     }
-
+    
     private void RenderLeafVisibilityList(int mainLeafId, int leafCount, bool enableLightmaps)
     {
         var mainLeaf = m_map.GetLeaf(mainLeafId);
         var visList = m_map.GetVisibilityList(mainLeaf.VisList);
         var listOffset = 0;
-        
+            
         for (var leafId = 1; leafId < leafCount; listOffset++)
         {
             // run-length encoding, see: https://www.gamers.org/dEngine/quake/spec/quake-spec34/qkspec_4.htm#BL4
@@ -111,7 +124,7 @@ public class RenderSystem
                 for (byte bit = 1; bit != 0; bit *= 2, leafId++)
                 {
                     var visMask = visList[listOffset];
-
+    
                     if ((visMask & bit) > 0)
                     {
                         RenderLeaf(leafId, enableLightmaps);
@@ -120,47 +133,32 @@ public class RenderSystem
             }
         }
     }
-
+    
     private void RenderCompleteHull(int hullId, bool enableLightmaps)
     {
         var hull = m_map.GetHull(hullId);
         var leafId = m_map.GetHullFirstLeafId(hullId);
-
+    
         for (var l = leafId; l < leafId + hull.VisLeafCount; l++)
         {
             RenderLeaf(l, enableLightmaps);
         }
     }
-
+    
     private void RenderLeaf(int leafId, bool enableLightmaps)
     {
         var surfaceMeshes = m_map.GetLeafMeshes(leafId);
-
+    
         foreach (var surfaceMesh in surfaceMeshes)
         {
             var lightmap = enableLightmaps ? surfaceMesh.Lightmap : m_map.FullLitLightmap;
-
+    
             surfaceMesh.Mesh.Bind();
             lightmap.Use(TextureUnit.Texture1);
             GL.DrawElements(PrimitiveType.TriangleFan, surfaceMesh.Mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
         }
     }
-
-    private void RenderEntity(
-        Entity entity,
-        ref TransformComponent transformComponent,
-        ref MeshComponent meshComponent,
-        ref ShaderComponent shaderComponent)
-    {
-        shaderComponent.Shader.Use();
-        shaderComponent.Shader.SetUniform("modelMatrix", transformComponent.ComputeMatrix());
-        shaderComponent.Shader.SetUniform("viewMatrix", m_viewMatrix);
-        shaderComponent.Shader.SetUniform("projectionMatrix", m_projectionMatrix);
-
-        meshComponent.Mesh.Bind();
-        GL.DrawElements(PrimitiveType.TriangleFan, meshComponent.Mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
-    }
-
+    
     private Matrix4 ComputeViewMatrix(TransformComponent transformComponent, CameraComponent cameraComponent)
     {
         var dir = Vector3.Normalize(cameraComponent.Target - transformComponent.Position);
@@ -175,17 +173,18 @@ public class RenderSystem
             new Vector4(right.Z, dir.Z, up.Z, 0),
             new Vector4(-dotX, -dotY, -dotZ, 1)
         );
-
+    
         // the world uses Quake's coordinate system
+        // convert to OpenGL's coordinate system
         var worldToViewMatrix = new Matrix4(
             1, 0, 0, 0,
             0, 0, -1, 0,
             0, 1, 0, 0,
             0, 0, 0, 1);
-
+    
         return lookAtMatrix * worldToViewMatrix;
     }
-    
+        
     private Matrix4 ComputeProjectionMatrix(CameraComponent cameraComponent)
     {
         return Matrix4.CreatePerspectiveFieldOfView(
