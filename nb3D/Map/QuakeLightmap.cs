@@ -1,3 +1,4 @@
+using System.Data;
 using OpenTK.Graphics.OpenGL4;
 using GL = OpenTK.Graphics.OpenGL4.GL;
 
@@ -5,30 +6,30 @@ namespace nb3D.Map;
 
 public class QuakeLightmap : IMeshTexture
 {
+    public const int Size = 16;
+
     private readonly int m_handle;
-    private readonly byte[] m_rawLightmapData;
 
-    public int Width { get; }
-    public int Height { get; }
-
-    public QuakeLightmap(int width, int height, byte[] rawLightmapData, bool rgb)
+    public QuakeLightmap(byte[] rawLightmapData)
     {
-        Width = width;
-        Height = height;
+        if (rawLightmapData.Length != Size * Size * 3)
+        {
+            throw new DataException($"Lightmaps must be {Size}x{Size}");
+        }
+
         m_handle = GL.GenTexture();
-        m_rawLightmapData = rawLightmapData;
 
         GL.BindTexture(TextureTarget.Texture2D, m_handle);
         GL.TexImage2D(
             TextureTarget.Texture2D,
             0,
             PixelInternalFormat.Rgb,
-            width,
-            height,
+            Size,
+            Size,
             0,
             PixelFormat.Rgb,
             PixelType.UnsignedByte,
-            BuildTexturePixels(rawLightmapData, rgb));
+            rawLightmapData);
 
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
@@ -48,31 +49,5 @@ public class QuakeLightmap : IMeshTexture
     public void Dispose()
     {
         GL.DeleteTexture(m_handle);
-    }
-
-    public bool ContainsBlack() => m_rawLightmapData.Any(b => b == 0);
-
-    private byte[] BuildTexturePixels(byte[] rawLightmapData, bool rgb)
-    {
-        var pixels = new byte[Width * Height * 3];
-
-        if (rgb)
-        {
-            for (var i = 0; i < rawLightmapData.Length; i++)
-            {
-                pixels[i] = rawLightmapData[i];
-            }
-        }
-        else
-        {
-            for (var i = 0; i < rawLightmapData.Length; i++)
-            {
-                pixels[i * 3] = rawLightmapData[i];
-                pixels[i * 3 + 1] = rawLightmapData[i];
-                pixels[i * 3 + 2] = rawLightmapData[i];
-            }
-        }
-
-        return pixels;
     }
 }

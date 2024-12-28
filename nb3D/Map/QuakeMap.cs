@@ -2,6 +2,7 @@ using System.Data;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using OpenTK.Mathematics;
+using StbImageSharp;
 
 namespace nb3D.Map;
 
@@ -171,6 +172,7 @@ public partial class QuakeMap
     private readonly Dictionary<int, QuakeTexture> m_textures = new();
     private readonly QuakePalette m_palette;
     private readonly WAD3[] m_wads;
+    private int m_lightmapCount;
 
     public unsafe int PlaneCount => m_header.Planes.Size / sizeof(Plane);
     public unsafe int NodeCount => m_header.Nodes.Size / sizeof(BspNode);
@@ -196,7 +198,7 @@ public partial class QuakeMap
         m_data = data;
         m_palette = palette;
         m_wads = wads;
-        FullLitLightmap = BuildFullLitLightmap(m_header.Version > BSP29);
+        FullLitLightmap = BuildFullLitLightmap();
 
         LoadTextures();
         LoadMeshes();
@@ -381,8 +383,8 @@ public partial class QuakeMap
 
         QuakeLightmap? lightmap;
         Vector2[] lightmapUvs;
-            
-        if (surface.LightmapOffset != -1 /*&& GetPlane(surface.PlaneId).Type == 1*/)
+
+        if (surface.LightmapOffset != -1 /*&& GetPlane(surface.PlaneId).Type == 1 && ++m_lightmapCount <= 7 && surfaceId == 42*/)
         {
             var rgb = m_header.Version > BSP29;
 
@@ -468,42 +470,80 @@ public partial class QuakeMap
             var maxU = uvs.Select(v => v.X).Max();
             var minV = uvs.Select(v => v.Y).Min();
             var maxV = uvs.Select(v => v.Y).Max();
-            var lightmapWidth = (int)Math.Ceiling((maxU - minU) / 16);
-            var lightmapHeight = (int)Math.Ceiling((maxV - minV) / 16);
+            var lightmapWidth = (int)Math.Ceiling((maxU - minU) / QuakeLightmap.Size);
+            var lightmapHeight = (int)Math.Ceiling((maxV - minV) / QuakeLightmap.Size);
 
-            if (lightmapWidth > 16 || lightmapHeight > 16)
+            if (lightmapWidth > QuakeLightmap.Size || lightmapHeight > QuakeLightmap.Size)
             {
                 throw new DataException($"Invalid lightmap size: {lightmapWidth}x{lightmapHeight}");
             }
-            
-            var channelCount = rgb ? 3 : 1;
-            var data = new byte[lightmapWidth * lightmapHeight * channelCount];
 
-            /*uvs = uvs
-                .Select(uv => new Vector2((uv.X - minU) / (maxU - minU), (uv.Y - minV) / (maxV - minV)))
-                .ToArray();*/
+            var uRatio = (float)lightmapWidth / QuakeLightmap.Size;
+            var vRatio = (float)lightmapHeight / QuakeLightmap.Size;
+
+            uvs = uvs
+                .Select(uv => new Vector2(
+                    ((uv.X - minU) / (maxU - minU)) * uRatio,
+                    ((uv.Y - minV) / (maxV - minV)) * vRatio))
+                .ToArray();
+
+            var data = new byte[QuakeLightmap.Size * QuakeLightmap.Size * 3];
+            var channelCount = rgb ? 3 : 1;
+
+            Array.Fill(data, (byte)255);
 
             fixed (byte* dataPtr = m_data)
             {
                 var lightmapPtr = dataPtr + m_header.Lightmaps.Offset + lightmapOffset;
 
-                for (var i = 0; i < data.Length; i++)
+                for (var i = 0; i < lightmapWidth * lightmapHeight * channelCount; i++)
                 {
-                    data[i] = lightmapPtr[i];
+                    var x = i % (lightmapWidth * channelCount);
+                    var y = i / (lightmapWidth * channelCount);
+
+                    if (rgb)
+                    {
+                        var p = (y * (QuakeLightmap.Size * 3)) + x;
+
+                        data[p] = lightmapPtr[i];
+                    }
+                    else
+                    {
+                        var p = (y * (QuakeLightmap.Size * 3)) + (x * 3);
+
+                        data[p] = lightmapPtr[i];
+                        data[p + 1] = lightmapPtr[i];
+                        data[p + 2] = lightmapPtr[i];
+                    }
                 }
             }
 
-            return new QuakeLightmap(lightmapWidth, lightmapHeight, data, rgb);
+            return new QuakeLightmap(data);
         }
     }
 
-    private QuakeLightmap BuildFullLitLightmap(bool rgb)
+    private QuakeLightmap BuildFullLitLightmap()
     {
-        var channelCount = rgb ? 3 : 1;
-        var fullLitData = new byte[16 * 16 * channelCount];
+        var fullLitData = new byte[16 * 16 * 3];
                         
         Array.Fill(fullLitData, (byte)255);
-        return new QuakeLightmap(16, 16, fullLitData, rgb);
+        return new QuakeLightmap(fullLitData);
+    }
+    
+    private QuakeLightmap BuildGrayLightmap()
+    {
+        var data = new byte[16 * 16 * 3];
+
+        for (int i = 0; i < 16 * 16; i++)
+        {
+            var val = (byte)(200 * ((float)i / (16 * 16)));
+
+            data[i * 3] = val;
+            data[i * 3 + 1] = val;
+            data[i * 3 + 2] = val;
+        }
+
+        return new QuakeLightmap(data);
     }
 
     private unsafe void CreateEntities()

@@ -42,7 +42,7 @@ public class Game : GameWindow
         LoadShaders();
         CreateCamera();
 
-        m_sceneRenderer = new SceneRenderer(m_world, m_map, m_mapShader);
+        m_sceneRenderer = new SceneRenderer(m_world, m_map, m_mapShader, SceneRenderer.Options.Default);
     }
 
     protected override void OnUnload()
@@ -79,7 +79,7 @@ public class Game : GameWindow
         var entity = m_world.Entity("Camera");
 
         // entity.Set(new TransformComponent {Position = new Vector3(-704, 2450, 0)});
-        entity.Set(new TransformComponent {Position = new Vector3(544, 288, 32)});
+        entity.Set(new TransformComponent {Position = new Vector3(1766, 3888, 288)});
         entity.Set(new CameraComponent
         {
             Fov = 90f,

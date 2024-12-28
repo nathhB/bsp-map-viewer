@@ -9,11 +9,11 @@ uniform sampler2D texture1;
 void main() {
     vec4 t0 = texture(texture0, texCoord);
     vec4 t1 = texture(texture1, lightmapCoord);
-    float lightmapIntensity = clamp(t1.r + 0.4, 0.0, 1.0);
+    float lightmapIntensity = clamp(t1.r, 0.0, 1.0);
     vec4 ligthmapColor = vec4(vec3(lightmapIntensity), 1.0);
 
     // outputColor = t0 * t1;
-    outputColor = t0 * ligthmapColor;
+    // outputColor = t0 * ligthmapColor;
     // outputColor = ligthmapColor;
-    // outputColor = t0;
+    outputColor = t1;
 }

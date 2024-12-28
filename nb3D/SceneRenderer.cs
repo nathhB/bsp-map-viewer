@@ -8,18 +8,32 @@ namespace nb3D;
 
 public class SceneRenderer
 {
+    public readonly struct Options
+    {
+        public static readonly Options Default = new Options(true);
+
+        public readonly bool EnableLightmaps;
+
+        public Options(bool enableLightmaps)
+        {
+            EnableLightmaps = enableLightmaps;
+        }
+    }
+
     private readonly Query<TransformComponent,MeshComponent,ShaderComponent> m_renderableEntitiesQuery;
     private readonly World m_world;
     private readonly QuakeMap m_map;
     private readonly Shader m_mapShader;
+    private readonly Options m_options;
     private Matrix4 m_viewMatrix;
     private Matrix4 m_projectionMatrix;
 
-    public SceneRenderer(World world, QuakeMap map, Shader mapShader)
+    public SceneRenderer(World world, QuakeMap map, Shader mapShader, Options options)
     {
         m_world = world;
         m_map = map;
         m_mapShader = mapShader;
+        m_options = options;
         m_renderableEntitiesQuery = world.QueryBuilder<TransformComponent, MeshComponent, ShaderComponent>()
             .Cached()
             .Build();
@@ -66,46 +80,33 @@ public class SceneRenderer
         m_mapShader.SetUniform("viewMatrix", m_viewMatrix);
         m_mapShader.SetUniform("projectionMatrix", m_projectionMatrix);
     
-        const bool ignoreVisibilityList = false;
-        const bool enableLightmaps = false;
-    
-        if (ignoreVisibilityList)
+        // for (var h = 0; h < m_map.HullCount; h++)
+        for (var h = 0; h < 1; h++)
         {
-            for (var h = 0; h < m_map.HullCount; h++)
+            var hull = m_map.GetHull(h);
+    
+            if (!m_map.TryFindLeafAt(cameraTransform.Position, h, out var leafId))
             {
-                RenderCompleteHull(h, enableLightmaps);
+                Console.WriteLine("Could not find leaf !");
+                continue;
             }
-        }
-        else
-        {
-            // for (var h = 0; h < m_map.HullCount; h++)
-            for (var h = 0; h < 1; h++)
+    
+            // Console.WriteLine($"Hull {h} ({hull.VisLeafCount}) => {m_map.GetLeaf(leafId).VisList}");
+    
+            var leaf = m_map.GetLeaf(leafId);
+    
+            if (leaf.VisList == -1)
             {
-                var hull = m_map.GetHull(h);
-    
-                if (!m_map.TryFindLeafAt(cameraTransform.Position, h, out var leafId))
-                {
-                    Console.WriteLine("Could not find leaf !");
-                    continue;
-                }
-    
-                // Console.WriteLine($"Hull {h} ({hull.VisLeafCount}) => {m_map.GetLeaf(leafId).VisList}");
-    
-                var leaf = m_map.GetLeaf(leafId);
-    
-                if (leaf.VisList == -1)
-                {
-                    RenderCompleteHull(h, enableLightmaps);
-                }
-                else
-                {
-                    RenderLeafVisibilityList(leafId, hull.VisLeafCount, enableLightmaps);
-                }
+                RenderCompleteHull(h);
+            }
+            else
+            {
+                RenderLeafVisibilityList(leafId, hull.VisLeafCount);
             }
         }
     }
     
-    private void RenderLeafVisibilityList(int mainLeafId, int leafCount, bool enableLightmaps)
+    private void RenderLeafVisibilityList(int mainLeafId, int leafCount)
     {
         var mainLeaf = m_map.GetLeaf(mainLeafId);
         var visList = m_map.GetVisibilityList(mainLeaf.VisList);
@@ -127,31 +128,31 @@ public class SceneRenderer
     
                     if ((visMask & bit) > 0)
                     {
-                        RenderLeaf(leafId, enableLightmaps);
+                        RenderLeaf(leafId);
                     }
                 }
             }
         }
     }
     
-    private void RenderCompleteHull(int hullId, bool enableLightmaps)
+    private void RenderCompleteHull(int hullId)
     {
         var hull = m_map.GetHull(hullId);
         var leafId = m_map.GetHullFirstLeafId(hullId);
     
         for (var l = leafId; l < leafId + hull.VisLeafCount; l++)
         {
-            RenderLeaf(l, enableLightmaps);
+            RenderLeaf(l);
         }
     }
     
-    private void RenderLeaf(int leafId, bool enableLightmaps)
+    private void RenderLeaf(int leafId)
     {
         var surfaceMeshes = m_map.GetLeafMeshes(leafId);
     
         foreach (var surfaceMesh in surfaceMeshes)
         {
-            var lightmap = enableLightmaps ? surfaceMesh.Lightmap : m_map.FullLitLightmap;
+            var lightmap = m_options.EnableLightmaps ? surfaceMesh.Lightmap : m_map.FullLitLightmap;
     
             surfaceMesh.Mesh.Bind();
             lightmap.Use(TextureUnit.Texture1);
