@@ -32,10 +32,12 @@ public class WAD3
         [FieldOffset(0)] public fixed char Name[16];        // Name of the texture.
         [FieldOffset(16)] public uint Width;                // width of picture, must be a multiple of 8
         [FieldOffset(20)] public uint Height;               // height of picture, must be a multiple of 8
-        [FieldOffset(24)] public uint Offset1;              // offset to u_char Pix[width   * height]
-        [FieldOffset(28)] public uint Offset2;              // offset to u_char Pix[width/2 * height/2]
-        [FieldOffset(32)] public uint Offset4;              // offset to u_char Pix[width/4 * height/4]
-        [FieldOffset(36)] public uint Offset8;              // offset to u_char Pix[width/8 * height/8]
+
+        // offset to u_char Pix[width   * height]
+        // offset to u_char Pix[width/2 * height/2]
+        // offset to u_char Pix[width/4 * height/4]
+        // offset to u_char Pix[width/8 * height/8]
+        [FieldOffset(24)] public fixed uint Offsets[4];              
     }
 
     public static WAD3 Load(string path)
@@ -78,14 +80,14 @@ public class WAD3
             {
                 var entryOffset = entrySize * i;
                 var entry = *(Entry*)(dataPtr + header.DirOffset + entryOffset);
+
+                if (entry.Compressed)
+                {
+                    throw new DataException("Compressed texture entries are not supported");
+                }
                 
                 if (entry.FileType == MipTextureType)
                 {
-                    if (entry.Compressed)
-                    {
-                        throw new DataException("Compressed texture entries are not supported");
-                    }
-
                     LoadTexture(dataPtr + entry.EntryOffset);
                 }
             }
@@ -97,16 +99,16 @@ public class WAD3
         var texture = *(MipTexture *)texturePtr;
         var textureName = Marshal.PtrToStringAnsi((IntPtr)texture.Name)!;
 
-        // Console.WriteLine($"WAD: {textureName} {texture.Width}x{texture.Height}");
+        Console.WriteLine($"WAD: {textureName} {texture.Width}x{texture.Height}");
 
         // the palette data is located after the fourth mipmap texture data
         // each mipmap texture size is the size of the previous one divided by 2
         // there are two dummy bytes between the last byte of the fourth mipmap and the palette data
         var fourthMipmapLength = (texture.Width / 8) * (texture.Height / 8);
-        var paletteDataPtr = texturePtr + texture.Offset8 + fourthMipmapLength + 2;
+        var paletteDataPtr = texturePtr + texture.Offsets[3] + fourthMipmapLength + 2;
         var paletteData = new byte[256 * 3];
         var rawTextureData = new byte[texture.Width * texture.Height];
-        var textureDataPtr = texturePtr + texture.Offset1;
+        var textureDataPtr = texturePtr + texture.Offsets[0];
 
         Marshal.Copy((IntPtr)paletteDataPtr, paletteData, 0, paletteData.Length);
         Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);

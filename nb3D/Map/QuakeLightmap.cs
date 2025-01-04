@@ -1,4 +1,3 @@
-using System.Data;
 using OpenTK.Graphics.OpenGL4;
 using GL = OpenTK.Graphics.OpenGL4.GL;
 
@@ -6,17 +5,10 @@ namespace nb3D.Map;
 
 public class QuakeLightmap : IMeshTexture
 {
-    public const int Size = 16;
-
     private readonly int m_handle;
 
-    public QuakeLightmap(byte[] rawLightmapData)
+    public QuakeLightmap(int width, int height, byte[] rawLightmapData)
     {
-        if (rawLightmapData.Length != Size * Size * 3)
-        {
-            throw new DataException($"Lightmaps must be {Size}x{Size}");
-        }
-
         m_handle = GL.GenTexture();
 
         GL.BindTexture(TextureTarget.Texture2D, m_handle);
@@ -24,8 +16,8 @@ public class QuakeLightmap : IMeshTexture
             TextureTarget.Texture2D,
             0,
             PixelInternalFormat.Rgb,
-            Size,
-            Size,
+            width,
+            height,
             0,
             PixelFormat.Rgb,
             PixelType.UnsignedByte,
@@ -34,8 +26,8 @@ public class QuakeLightmap : IMeshTexture
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
         
         GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
     }

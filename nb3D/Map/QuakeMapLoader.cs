@@ -15,7 +15,6 @@ public static class QuakeMapLoader
         Console.WriteLine(map.NodeCount);
         Console.WriteLine(map.LeafCount);
         Console.WriteLine(map.TextureInfoCount);
-        Console.WriteLine(map.LightMapCount);
 
         return map;
     }

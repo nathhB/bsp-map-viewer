@@ -12,8 +12,8 @@ void main() {
     float lightmapIntensity = clamp(t1.r, 0.0, 1.0);
     vec4 ligthmapColor = vec4(vec3(lightmapIntensity), 1.0);
 
-    // outputColor = t0 * t1;
+    outputColor = t0 * t1;
     // outputColor = t0 * ligthmapColor;
     // outputColor = ligthmapColor;
-    outputColor = t1;
+    // outputColor = t1;
 }

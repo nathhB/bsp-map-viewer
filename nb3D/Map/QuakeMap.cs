@@ -1,8 +1,6 @@
 using System.Data;
-using System.Drawing;
 using System.Runtime.InteropServices;
 using OpenTK.Mathematics;
-using StbImageSharp;
 
 namespace nb3D.Map;
 
@@ -83,21 +81,19 @@ public partial class QuakeMap
         public int Type;		// Plane type
     }
         
-    private struct Surface
+    [StructLayout(LayoutKind.Explicit, Pack = 0)]
+    private unsafe struct Surface
     {
-        public ushort PlaneId;      // The plane in which the surface lies
-        public ushort Side;		    // 0 if in front of the plane, 1 if behind the plane
-        public int EdgeListIndex;   // First edge in the list of edges
-        public ushort EdgeCount;    // Index of the first edge in the list of edges
+        [FieldOffset(0)] public ushort PlaneId;      // The plane in which the surface lies
+        [FieldOffset(2)] public ushort Side;	     // 0 if in front of the plane, 1 if behind the plane
+        [FieldOffset(4)] public int EdgeListIndex;   // First edge in the list of edges
+        [FieldOffset(8)] public ushort EdgeCount;    // Index of the first edge in the list of edges
         // This is NOT the ID of the edge
-        public ushort TexinfoId;    // Index to the texture info which contains an index to the mipmap texture
+        [FieldOffset(10)] public ushort TexinfoId;    // Index to the texture info which contains an index to the mipmap texture
             
         // Type of light or 0xFF for no light map
-        public byte Lightstyle0;
-        public byte Lightstyle1;
-        public byte Lightstyle2;
-        public byte Lightstyle3;
-        public int LightmapOffset;  // Offset to the lightmap or -1
+        [FieldOffset(12)] public fixed byte Lightstyles[4];
+        [FieldOffset(16)] public int LightmapOffset;  // Offset to the lightmap or -1
     }
     
     private struct Edge
@@ -113,6 +109,8 @@ public partial class QuakeMap
         public float Z;
     
         public override string ToString() => $"({X}, {Y}, {Z})";
+
+        public static explicit operator Vector3(Vertex v) => new Vector3(v.X, v.Y, v.Z);
     }
     
     [StructLayout(LayoutKind.Explicit, Pack = 0)]
@@ -142,7 +140,7 @@ public partial class QuakeMap
         public int Offset;  // Offset to entry, in bytes, from start of file
         public int Size;    // Size of entry in file, in bytes
     }
-        
+
     private struct Header
     {
         public int Version;
@@ -163,6 +161,8 @@ public partial class QuakeMap
         public Entry Hulls;
     }
 
+    private record struct SurfaceExtents(int MinU, int MinV, int Width, int Height);
+
     private const int BSP29 = 29;
     private const int BSP30 = 30;
     private static readonly int[] SupportedVersions = { BSP29, BSP30 };
@@ -180,7 +180,6 @@ public partial class QuakeMap
     public unsafe int SurfaceCount => m_header.Surfaces.Size / sizeof(Surface);
     public unsafe int HullCount => m_header.Hulls.Size / sizeof(Hull);
     public unsafe int TextureInfoCount => m_header.Texinfo.Size / sizeof(TextureInfo);
-    public unsafe int LightMapCount => m_header.Lightmaps.Size / sizeof(TextureInfo);
     public QuakeLightmap FullLitLightmap { get; }
 
     public QuakeMap(byte[] data, QuakePalette palette, WAD3[] wads)
@@ -353,7 +352,7 @@ public partial class QuakeMap
         }
     }
         
-    private bool TryCreateSurfaceMesh(int surfaceId, out QuakeMapMesh? mapMesh)
+    private unsafe bool TryCreateSurfaceMesh(int surfaceId, out QuakeMapMesh? mapMesh)
     {
         var surface = GetSurface(surfaceId);
         var vertexCount = surface.EdgeCount;
@@ -376,19 +375,20 @@ public partial class QuakeMap
             // if edgeId < 0, vertices are in order vertex1 - vertex0
             // otherwise, they are in order vertex0 - vertex1
             var edge = GetEdge(edgeId > 0 ? edgeId : -edgeId);
-            var vertex = GetVertex(edgeId > 0 ? edge.Vertex0 : edge.Vertex1);
 
-            vertices[e] = new Vector3(vertex.X, vertex.Y, vertex.Z);
+            vertices[e] = (Vector3)GetVertex(edgeId > 0 ? edge.Vertex0 : edge.Vertex1);
         }
 
         QuakeLightmap? lightmap;
         Vector2[] lightmapUvs;
+        var hasLightmap = surface.Lightstyles[0] != 0xFF && surface.LightmapOffset != -1;
 
-        if (surface.LightmapOffset != -1 /*&& GetPlane(surface.PlaneId).Type == 1 && ++m_lightmapCount <= 7 && surfaceId == 42*/)
+        if (hasLightmap/* && GetPlane(surface.PlaneId).Type == 2/* && ++m_lightmapCount == 90 && surfaceId == 394*/)
         {
             var rgb = m_header.Version > BSP29;
+            var extents = ComputeSurfaceExtents(surface);
 
-            lightmap = BuildLightmap(vertices, textureInfo, surface.LightmapOffset, rgb, out lightmapUvs);
+            lightmap = BuildLightmap(vertices, textureInfo, extents, surface.LightmapOffset, rgb, out lightmapUvs);
         }
         else
         {
@@ -403,7 +403,7 @@ public partial class QuakeMap
 
         return true;
     }
-        
+    
     // fan triangulation from surface convex polygon
     private void BuildSurfaceVertexData(
         Vector3[] vertices,
@@ -452,73 +452,70 @@ public partial class QuakeMap
         }
     }
 
-    private QuakeLightmap BuildLightmap(
-        Vector3[] vertices,
+    private QuakeLightmap BuildLightmap(Vector3[] vertices,
         TextureInfo textureInfo,
+        SurfaceExtents surfaceExtents,
         int lightmapOffset,
         bool rgb,
         out Vector2[] uvs)
     {
         unsafe
         {
-            uvs = vertices
-                .Select(v => new Vector2(
-                    Vector3.Dot(textureInfo.Snrm, v) + textureInfo.Soff,
-                    Vector3.Dot(textureInfo.Tnrm, v) + textureInfo.Toff)
-                ).ToArray();
-            var minU = uvs.Select(v => v.X).Min();
-            var maxU = uvs.Select(v => v.X).Max();
-            var minV = uvs.Select(v => v.Y).Min();
-            var maxV = uvs.Select(v => v.Y).Max();
-            var lightmapWidth = (int)Math.Ceiling((maxU - minU) / QuakeLightmap.Size);
-            var lightmapHeight = (int)Math.Ceiling((maxV - minV) / QuakeLightmap.Size);
+            var lightmapWidth = (surfaceExtents.Width / 16) + 1;
+            var lightmapHeight = (surfaceExtents.Height / 16) + 1;
+            var uRatio = (lightmapWidth - 1) / 32f;
+            var vRatio = (lightmapHeight - 1) / 32f;
 
-            if (lightmapWidth > QuakeLightmap.Size || lightmapHeight > QuakeLightmap.Size)
+            uvs = new Vector2[vertices.Length];
+            
+            for (var i = 0; i < uvs.Length; i++)
             {
-                throw new DataException($"Invalid lightmap size: {lightmapWidth}x{lightmapHeight}");
+                var vertex = vertices[i];
+                var u = Vector3.Dot(textureInfo.Snrm, vertex) + textureInfo.Soff;
+                var v = Vector3.Dot(textureInfo.Tnrm, vertex) + textureInfo.Toff;
+
+                u = ((u - surfaceExtents.MinU) / surfaceExtents.Width) * uRatio;
+                v = ((v - surfaceExtents.MinV) / surfaceExtents.Height) * vRatio;
+
+                u = Math.Clamp(u, 1 / 32f, uRatio);
+                v = Math.Clamp(v, 1 / 32f, vRatio);
+
+                uvs[i] = new Vector2(u, v);
             }
 
-            var uRatio = (float)lightmapWidth / QuakeLightmap.Size;
-            var vRatio = (float)lightmapHeight / QuakeLightmap.Size;
-
-            uvs = uvs
-                .Select(uv => new Vector2(
-                    ((uv.X - minU) / (maxU - minU)) * uRatio,
-                    ((uv.Y - minV) / (maxV - minV)) * vRatio))
-                .ToArray();
-
-            var data = new byte[QuakeLightmap.Size * QuakeLightmap.Size * 3];
-            var channelCount = rgb ? 3 : 1;
-
-            Array.Fill(data, (byte)255);
+            var lightmapTextureData = new byte[32 * 32 * 3];
 
             fixed (byte* dataPtr = m_data)
             {
                 var lightmapPtr = dataPtr + m_header.Lightmaps.Offset + lightmapOffset;
 
-                for (var i = 0; i < lightmapWidth * lightmapHeight * channelCount; i++)
+                if (rgb)
                 {
-                    var x = i % (lightmapWidth * channelCount);
-                    var y = i / (lightmapWidth * channelCount);
-
-                    if (rgb)
+                    for (var i = 0; i < lightmapWidth * lightmapHeight * 3; i++)
                     {
-                        var p = (y * (QuakeLightmap.Size * 3)) + x;
+                        var x = i % (lightmapWidth * 3);
+                        var y = i / (lightmapWidth * 3);
+                        var p = y * (32 * 3) + x;
 
-                        data[p] = lightmapPtr[i];
+                        lightmapTextureData[p] = lightmapPtr[i];
                     }
-                    else
+                }
+                else
+                {
+                    for (var i = 0; i < lightmapWidth * lightmapHeight; i++)
                     {
-                        var p = (y * (QuakeLightmap.Size * 3)) + (x * 3);
+                        var x = i % lightmapWidth;
+                        var y = i / lightmapWidth;
+                        var p = y * (32 * 3) + (x * 3);
 
-                        data[p] = lightmapPtr[i];
-                        data[p + 1] = lightmapPtr[i];
-                        data[p + 2] = lightmapPtr[i];
+                        lightmapTextureData[p] = lightmapPtr[i];
+                        lightmapTextureData[p + 1] = lightmapPtr[i];
+                        lightmapTextureData[p + 2] = lightmapPtr[i];
                     }
                 }
             }
 
-            return new QuakeLightmap(data);
+            return new QuakeLightmap(32, 32, lightmapTextureData);
         }
     }
 
@@ -527,23 +524,26 @@ public partial class QuakeMap
         var fullLitData = new byte[16 * 16 * 3];
                         
         Array.Fill(fullLitData, (byte)255);
-        return new QuakeLightmap(fullLitData);
+        return new QuakeLightmap(16, 16, fullLitData);
     }
     
-    private QuakeLightmap BuildGrayLightmap()
+    private QuakeLightmap BuildGrayLightmap(int width, int height)
     {
-        var data = new byte[16 * 16 * 3];
+        var data = new byte[width * height * 3];
 
-        for (int i = 0; i < 16 * 16; i++)
+        for (var i = 0; i < width * height; i++)
         {
-            var val = (byte)(200 * ((float)i / (16 * 16)));
+            var x = i % width;
+            var y = i / width;
+            var p = y * (width * 3) + (x * 3);
+            var val = (byte)(200 * ((float)i / (width * height)));
 
-            data[i * 3] = val;
-            data[i * 3 + 1] = val;
-            data[i * 3 + 2] = val;
+            data[p] = val;
+            data[p + 1] = val;
+            data[p + 2] = val;
         }
 
-        return new QuakeLightmap(data);
+        return new QuakeLightmap(16, 16, data);
     }
 
     private unsafe void CreateEntities()
@@ -579,5 +579,45 @@ public partial class QuakeMap
 
         texture = null;
         return false;
+    }
+
+    private SurfaceExtents ComputeSurfaceExtents(Surface surface)
+    {
+        var minU = float.MaxValue;
+        var minV = float.MaxValue;
+        var maxU = -float.MaxValue;
+        var maxV = -float.MaxValue;
+        var texInfo = GetTextureInfo(surface.TexinfoId);
+
+        for (var e = 0; e < surface.EdgeCount; e++)
+        {
+            var edgeListIndex = surface.EdgeListIndex + e;
+            var edgeId = GetEdgeId(edgeListIndex);
+        
+            // edgeId can be negative
+            // if edgeId < 0, vertices are in order vertex1 - vertex0
+            // otherwise, they are in order vertex0 - vertex1
+            var edge = GetEdge(edgeId > 0 ? edgeId : -edgeId);
+            var vertex = GetVertex(edgeId > 0 ? edge.Vertex0 : edge.Vertex1);
+            
+            // use doubles to avoid floating point precision issues
+            double vX = vertex.X;
+            double vY = vertex.Y;
+            double vZ = vertex.Z;
+            var u = (vX * texInfo.Snrm.X + vY * texInfo.Snrm.Y + vZ * texInfo.Snrm.Z) + texInfo.Soff;
+            var v = (vX * texInfo.Tnrm.X + vY * texInfo.Tnrm.Y + vZ * texInfo.Tnrm.Z) + texInfo.Toff;
+
+            minU = (float)Math.Min(u, minU);
+            minV = (float)Math.Min(v, minV);
+            maxU = (float)Math.Max(u, maxU);
+            maxV = (float)Math.Max(v, maxV);
+        }
+
+        minU = 16 * (int)Math.Floor(minU / 16);
+        maxU = 16 * (int)Math.Ceiling(maxU / 16);
+        minV = 16 * (int)Math.Floor(minV / 16);
+        maxV = 16 * (int)Math.Ceiling(maxV / 16);
+
+        return new SurfaceExtents((int)minU, (int)minV, (int)(maxU - minU), (int)(maxV - minV));
     }
 }
