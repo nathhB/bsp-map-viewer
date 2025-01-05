@@ -26,10 +26,15 @@ public class Game : GameWindow
             new NativeWindowSettings { ClientSize = (width, height), Title = title })
     {
         m_map = QuakeMapLoader.Load(
-            "Assets/Maps/de_dust2.bsp",
-            "Assets/Maps/palette.lmp",
+            "Assets/Maps/start.bsp",
+            "Assets/Maps/cs_palette.lmp",
             "Assets/WADs/de_aztec.wad",
-            "Assets/WADs/cs_dust.wad");
+            "Assets/WADs/cs_dust.wad",
+            "Assets/WADs/chateau.wad",
+            "Assets/WADs/cs_office.wad",
+            "Assets/WADs/de_aztec.wad",
+            "Assets/WADs/de_piranesi.wad",
+            "Assets/WADs/halflife.wad");
         m_freeFlyCameraSystem = new FreeFlyCameraSystem(m_world, KeyboardState);
     }
 

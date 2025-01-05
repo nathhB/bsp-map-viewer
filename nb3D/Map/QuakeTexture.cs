@@ -10,12 +10,15 @@ public class QuakeTexture : IMeshTexture
     public string Name { get; }
     public int Width { get; }
     public int Height { get; }
+    public bool LoadedFromWAD { get; }
 
-    public QuakeTexture(string name, int width, int height, byte[] rawTextureData, QuakePalette palette)
+    public QuakeTexture(
+        string name, int width, int height, byte[] rawTextureData, QuakePalette palette, bool loadedFromWad)
     {
         Name = name;
         Width = width;
         Height = height;
+        LoadedFromWAD = loadedFromWad;
         m_handle = GL.GenTexture();
 
         GL.BindTexture(TextureTarget.Texture2D, m_handle);

@@ -189,6 +189,9 @@
       <None Update="Assets\Maps\de_aztec.bsp">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
+      <None Update="Assets\Maps\cs_palette.lmp">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
     </ItemGroup>
 
     <ItemGroup>

@@ -88,18 +88,25 @@ public class WAD3
                 
                 if (entry.FileType == MipTextureType)
                 {
-                    LoadTexture(dataPtr + entry.EntryOffset);
+                    var texture = LoadTexture(dataPtr + entry.EntryOffset);
+
+                    m_textures[texture.Name] = texture;
                 }
             }
         }
     }
 
-    private unsafe void LoadTexture(byte *texturePtr)
+    public static unsafe QuakeTexture LoadTexture(byte* texturePtr)
     {
-        var texture = *(MipTexture *)texturePtr;
+        var texture = *(MipTexture*)texturePtr;
         var textureName = Marshal.PtrToStringAnsi((IntPtr)texture.Name)!;
 
-        Console.WriteLine($"WAD: {textureName} {texture.Width}x{texture.Height}");
+        // Console.WriteLine($"WAD: {textureName} {texture.Width}x{texture.Height}");
+
+        if (texture.Width % 8 != 0 || texture.Height % 8 != 0)
+        {
+            throw new InvalidDataException($"Texture {textureName} width and/or height are not a multiple of 8");
+        }
 
         // the palette data is located after the fourth mipmap texture data
         // each mipmap texture size is the size of the previous one divided by 2
@@ -114,6 +121,8 @@ public class WAD3
         Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);
 
         var palette = new QuakePalette(paletteData);
-        m_textures[textureName] = new QuakeTexture(textureName, (int)texture.Width, (int)texture.Height, rawTextureData, palette);
+
+        return new QuakeTexture(
+            textureName, (int)texture.Width, (int)texture.Height, rawTextureData, palette, true);
     }
 }

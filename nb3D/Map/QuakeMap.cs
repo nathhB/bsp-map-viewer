@@ -119,10 +119,11 @@ public partial class QuakeMap
         [FieldOffset(0)] public fixed char Name[16];        // Name of the texture.
         [FieldOffset(16)] public uint Width;                // width of picture, must be a multiple of 8
         [FieldOffset(20)] public uint Height;               // height of picture, must be a multiple of 8
-        [FieldOffset(24)] public uint Offset1;              // offset to u_char Pix[width   * height]
-        [FieldOffset(28)] public uint Offset2;              // offset to u_char Pix[width/2 * height/2]
-        [FieldOffset(32)] public uint Offset4;              // offset to u_char Pix[width/4 * height/4]
-        [FieldOffset(36)] public uint Offset8;              // offset to u_char Pix[width/8 * height/8]
+        // offset to u_char Pix[width   * height]
+        // offset to u_char Pix[width/2 * height/2]
+        // offset to u_char Pix[width/4 * height/4]
+        // offset to u_char Pix[width/8 * height/8]
+        [FieldOffset(24)] public fixed uint Offsets[4];
     }
     
     private struct TextureInfo
@@ -300,12 +301,13 @@ public partial class QuakeMap
                 var texturePtr = mipHeaderPtr + offsets[t];
                 var texture = *(MipTexture*)texturePtr;
                 var textureName = Marshal.PtrToStringAnsi((IntPtr)texture.Name)!;
+                var loadFromWAD = texture.Offsets[0] == 0;
 
-                Console.WriteLine($"{textureName} - {texture.Width}x{texture.Height}");
+                Console.WriteLine($"{textureName} - {texture.Width}x{texture.Height} (loaded from WAD: {loadFromWAD})");
 
                 QuakeTexture? quakeTexture;
 
-                if (texture.Offset1 == 0)
+                if (loadFromWAD)
                 {
                     if (!TryFindTextureInWADs(textureName, out quakeTexture))
                     {
@@ -314,11 +316,19 @@ public partial class QuakeMap
                 }
                 else
                 {
-                    var textureDataPtr = texturePtr + texture.Offset1;
-                    var rawTextureData = new byte[texture.Width * texture.Height];
+                    if (m_header.Version == BSP29)
+                    {
+                        var textureDataPtr = texturePtr + texture.Offsets[0];
+                        var rawTextureData = new byte[texture.Width * texture.Height];
 
-                    Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);    
-                    quakeTexture = new QuakeTexture(textureName, (int)texture.Width, (int)texture.Height, rawTextureData, m_palette);
+                        Marshal.Copy((IntPtr)textureDataPtr, rawTextureData, 0, rawTextureData.Length);
+                        quakeTexture = new QuakeTexture(
+                            textureName, (int)texture.Width, (int)texture.Height, rawTextureData, m_palette, false);
+                    }
+                    else
+                    {
+                        quakeTexture = WAD3.LoadTexture(texturePtr);
+                    }
                 }
 
                 if (quakeTexture != null)
