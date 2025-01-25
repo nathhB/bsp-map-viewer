@@ -2,11 +2,11 @@ using OpenTK.Graphics.OpenGL4;
 
 namespace nb3D.Map;
 
-public class QuakeSurfaceMeshDataProvider(float[] vertexData, uint[] vertexIndices) : IMeshDataProvider
+public class QuakeSurfaceMeshDataProvider(float[] vertexData, uint[]? vertexIndices) : IMeshDataProvider
 {
-    private float[] m_vertexData = vertexData;
-
-    public uint[] VertexIndices { get; } = vertexIndices;
+    public float[] VertexData { get; } = vertexData;
+    public uint[]? VertexIndices { get; } = vertexIndices;
+    public bool UseElementBufferObject => true;
 
     public void BuildBufferData()
     {
@@ -21,7 +21,6 @@ public class QuakeSurfaceMeshDataProvider(float[] vertexData, uint[] vertexIndic
         const int textureDataOffset = vertexDataLength * sizeof(float);
         const int lightmapDataOffset = (vertexDataLength + textureDataLength) * sizeof(float);
         
-        // vertices data
         var stride = (vertexDataLength + textureDataLength + lightmapDataLength) * sizeof(float);
         
         GL.VertexAttribPointer(0, vertexDataLength, VertexAttribPointerType.Float, false, stride, 0);

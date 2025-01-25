@@ -393,7 +393,7 @@ public partial class QuakeMap
         Vector2[] lightmapUvs;
         var hasLightmap = surface.Lightstyles[0] != 0xFF && surface.LightmapOffset != -1;
 
-        if (hasLightmap/* && GetPlane(surface.PlaneId).Type == 2/* && ++m_lightmapCount == 90 && surfaceId == 394*/)
+        if (hasLightmap)
         {
             var rgb = m_header.Version > BSP29;
             var extents = ComputeSurfaceExtents(surface);
@@ -402,8 +402,10 @@ public partial class QuakeMap
         }
         else
         {
-            lightmap = FullLitLightmap;
-            lightmapUvs = new Vector2[vertices.Length];
+            /*lightmap = FullLitLightmap;
+            lightmapUvs = new Vector2[vertices.Length];*/
+            mapMesh = null;
+            return false;
         }
 
         BuildSurfaceVertexData(vertices, lightmapUvs, textureInfo, out var vertexData, out var vertexIndices);
@@ -420,7 +422,7 @@ public partial class QuakeMap
         Vector2[] lightmapUvs,
         TextureInfo textureInfo,
         out float[] vertexData,
-        out uint[] vertexIndices)
+        out uint[]? vertexIndices)
     {
         // 3 bytes for vertices, 2 bytes of texture coordinates, 2 bytes for lightmap coodinates
         const int vertexDataLength = 7;
@@ -533,7 +535,7 @@ public partial class QuakeMap
     {
         var fullLitData = new byte[16 * 16 * 3];
                         
-        Array.Fill(fullLitData, (byte)255);
+        Array.Fill(fullLitData, (byte)0);
         return new QuakeLightmap(16, 16, fullLitData);
     }
     

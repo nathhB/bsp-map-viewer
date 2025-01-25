@@ -1,0 +1,10 @@
+{
+  "width": 256,
+  "height": 256,
+  "right": "Assets/Skyboxes/Desert/Deslf.tga",
+  "left": "Assets/Skyboxes/Desert/Desrt.tga",
+  "top": "Assets/Skyboxes/Desert/Desup.tga",
+  "bottom": "Assets/Skyboxes/Desert/Desdn.tga",
+  "back": "Assets/Skyboxes/Desert/Desbk.tga",
+  "front": "Assets/Skyboxes/Desert/Desft.tga"
+}

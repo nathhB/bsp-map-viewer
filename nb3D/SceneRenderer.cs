@@ -8,31 +8,44 @@ namespace nb3D;
 
 public class SceneRenderer
 {
-    public readonly struct Options
+    public readonly struct Options(bool enableLightmaps)
     {
-        public static readonly Options Default = new Options(true);
+        public static readonly Options Default = new(true);
 
-        public readonly bool EnableLightmaps;
-
-        public Options(bool enableLightmaps)
-        {
-            EnableLightmaps = enableLightmaps;
-        }
+        public readonly bool EnableLightmaps = enableLightmaps;
     }
+    
+    // the world uses Quake's coordinate system
+    // convert to OpenGL's coordinate system
+    private static readonly Matrix4 s_worldToViewMatrix = new(
+        1, 0, 0, 0,
+        0, 0, -1, 0,
+        0, 1, 0, 0,
+        0, 0, 0, 1);
 
     private readonly Query<TransformComponent,MeshComponent,ShaderComponent> m_renderableEntitiesQuery;
     private readonly World m_world;
     private readonly QuakeMap m_map;
     private readonly Shader m_mapShader;
+    private readonly Shader m_skyboxShader;
+    private readonly SkyboxMesh m_skyboxMesh;
     private readonly Options m_options;
     private Matrix4 m_viewMatrix;
     private Matrix4 m_projectionMatrix;
 
-    public SceneRenderer(World world, QuakeMap map, Shader mapShader, Options options)
+    public SceneRenderer(
+        World world,
+        QuakeMap map,
+        SkyboxTexture skyboxTexture,
+        Shader mapShader,
+        Shader skyboxShader,
+        Options options)
     {
         m_world = world;
         m_map = map;
         m_mapShader = mapShader;
+        m_skyboxShader = skyboxShader;
+        m_skyboxMesh = new SkyboxMesh(skyboxTexture);
         m_options = options;
         m_renderableEntitiesQuery = world.QueryBuilder<TransformComponent, MeshComponent, ShaderComponent>()
             .Cached()
@@ -50,8 +63,9 @@ public class SceneRenderer
         m_viewMatrix = ComputeViewMatrix(cameraTransform, cameraComponent);
         m_projectionMatrix = ComputeProjectionMatrix(cameraComponent);
 
+        RenderSkybox(cameraTransform, cameraComponent);
         RenderMap(camera);
-        m_renderableEntitiesQuery.Each(RenderEntity);
+        // m_renderableEntitiesQuery.Each(RenderEntity);
     }
 
     private void RenderEntity(
@@ -61,12 +75,37 @@ public class SceneRenderer
         ref ShaderComponent shaderComp)
     {
         shaderComp.Shader.Use();
+        shaderComp.Shader.SetUniform("texture0", 0);
         shaderComp.Shader.SetUniform("modelMatrix", transformComp.ComputeMatrix());
         shaderComp.Shader.SetUniform("viewMatrix", m_viewMatrix);
         shaderComp.Shader.SetUniform("projectionMatrix", m_projectionMatrix);
-            
+        
         meshComp.Mesh.Bind();
-        GL.DrawElements(PrimitiveType.Triangles, meshComp.Mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
+
+        if (meshComp.Mesh.UseElementBufferObject)
+        {
+            GL.DrawElements(PrimitiveType.Triangles, meshComp.Mesh.VertexIndexCount,
+                DrawElementsType.UnsignedInt, 0);
+        }
+        else
+        {
+            GL.DrawArrays(PrimitiveType.Triangles, 0, meshComp.Mesh.VertexCount);
+        }
+    }
+
+    private void RenderSkybox(TransformComponent cameraTransform, CameraComponent cameraComponent)
+    {
+        GL.DepthMask(false);
+
+        m_skyboxShader.Use();
+        m_mapShader.SetUniform("texture0", 0);
+        m_mapShader.SetUniform("viewMatrix", ComputeSkyboxViewMatrix(cameraTransform));
+        m_mapShader.SetUniform("projectionMatrix", m_projectionMatrix);
+        
+        m_skyboxMesh.Bind();
+        GL.DrawArrays(PrimitiveType.Triangles, 0, m_skyboxMesh.VertexCount);
+
+        GL.DepthMask(true);
     }
     
     private void RenderMap(Entity camera)
@@ -156,7 +195,8 @@ public class SceneRenderer
     
             surfaceMesh.Mesh.Bind();
             lightmap.Use(TextureUnit.Texture1);
-            GL.DrawElements(PrimitiveType.TriangleFan, surfaceMesh.Mesh.VertexCount, DrawElementsType.UnsignedInt, 0);
+            GL.DrawElements(PrimitiveType.TriangleFan, surfaceMesh.Mesh.VertexIndexCount,
+                DrawElementsType.UnsignedInt, 0);
         }
     }
     
@@ -175,15 +215,14 @@ public class SceneRenderer
             new Vector4(-dotX, -dotY, -dotZ, 1)
         );
     
-        // the world uses Quake's coordinate system
-        // convert to OpenGL's coordinate system
-        var worldToViewMatrix = new Matrix4(
-            1, 0, 0, 0,
-            0, 0, -1, 0,
-            0, 1, 0, 0,
-            0, 0, 0, 1);
+        return lookAtMatrix * s_worldToViewMatrix;
+    }
     
-        return lookAtMatrix * worldToViewMatrix;
+    private Matrix4 ComputeSkyboxViewMatrix(TransformComponent transformComponent)
+    {
+        var lookAtMatrix = Matrix4.CreateRotationY(transformComponent.EulerAngles.Z);
+
+        return lookAtMatrix;
     }
         
     private Matrix4 ComputeProjectionMatrix(CameraComponent cameraComponent)

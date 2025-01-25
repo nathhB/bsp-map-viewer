@@ -12,13 +12,11 @@ namespace nb3D;
 
 public class Game : GameWindow
 {
-    public struct RenderKind;
-
     private readonly FreeFlyCameraSystem m_freeFlyCameraSystem;
     private readonly QuakeMap m_map;
-    private readonly Stopwatch m_frameTimeStopwatch = new Stopwatch();
     private World m_world = World.Create();
     private Shader m_mapShader;
+    private Shader m_skyboxShader;
     private SceneRenderer m_sceneRenderer;
 
     public Game(int width, int height, string title) :
@@ -26,7 +24,7 @@ public class Game : GameWindow
             new NativeWindowSettings { ClientSize = (width, height), Title = title })
     {
         m_map = QuakeMapLoader.Load(
-            "Assets/Maps/start.bsp",
+            "Assets/Maps/de_dust2.bsp",
             "Assets/Maps/cs_palette.lmp",
             "Assets/WADs/de_aztec.wad",
             "Assets/WADs/cs_dust.wad",
@@ -42,12 +40,19 @@ public class Game : GameWindow
     {
         base.OnLoad();
         GL.Enable(EnableCap.DepthTest);
-        GL.ClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+        GL.ClearColor(1, 0f, 0f, 1.0f);
         
         LoadShaders();
         CreateCamera();
 
-        m_sceneRenderer = new SceneRenderer(m_world, m_map, m_mapShader, SceneRenderer.Options.Default);
+        var skyboxTexture = SkyboxTexture.Load("Assets/Skyboxes/skybox_desert.json");
+        m_sceneRenderer = new SceneRenderer(
+            m_world,
+            m_map,
+            skyboxTexture,
+            m_mapShader,
+            m_skyboxShader,
+            SceneRenderer.Options.Default);
     }
 
     protected override void OnUnload()
@@ -64,7 +69,6 @@ public class Game : GameWindow
 
     protected override void OnRenderFrame(FrameEventArgs args)
     {
-        m_frameTimeStopwatch.Restart();
         base.OnRenderFrame(args);
         
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
@@ -83,8 +87,8 @@ public class Game : GameWindow
     {
         var entity = m_world.Entity("Camera");
 
-        // entity.Set(new TransformComponent {Position = new Vector3(-704, 2450, 0)});
-        entity.Set(new TransformComponent {Position = new Vector3(1766, 3888, 288)});
+        entity.Set(new TransformComponent {Position = Vector3.Zero});
+        // entity.Set(new TransformComponent {Position = new Vector3(1766, 3888, 288)});
         entity.Set(new CameraComponent
         {
             Fov = 90f,
@@ -101,5 +105,6 @@ public class Game : GameWindow
         Shader.CompileFromFiles("Assets/Shaders/shader2.vert", "Assets/Shaders/shader2.frag");
         Shader.CompileFromFiles("Assets/Shaders/shader3.vert", "Assets/Shaders/shader3.frag");
         m_mapShader = Shader.CompileFromFiles("Assets/Shaders/mapShader.vert", "Assets/Shaders/mapShader.frag");
+        m_skyboxShader = Shader.CompileFromFiles("Assets/Shaders/skybox.vert", "Assets/Shaders/skybox.frag");
     }
 }
