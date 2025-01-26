@@ -207,9 +207,6 @@
       <None Update="Assets\Skyboxes\Desert\Desrt.tga">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
-      <None Update="Assets\Skyboxes\Desert\Desup.tga">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
       <None Update="Assets\Skyboxes\skybox_desert.json">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
@@ -217,6 +214,9 @@
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
       <None Update="Assets\Shaders\skybox.frag">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
+      <None Update="Assets\Skyboxes\Desert\Desup.tga">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
     </ItemGroup>
