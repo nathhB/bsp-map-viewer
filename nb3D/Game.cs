@@ -1,12 +1,13 @@
-using System.Diagnostics;
+using System.Numerics;
 using Flecs.NET.Core;
 using nb3D.Components;
 using nb3D.Map;
 using nb3D.Systems;
+using nb3D.UI;
 using OpenTK.Graphics.OpenGL4;
-using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
+using Vector3 = OpenTK.Mathematics.Vector3;
 
 namespace nb3D;
 
@@ -14,17 +15,21 @@ public class Game : GameWindow
 {
     private readonly FreeFlyCameraSystem m_freeFlyCameraSystem;
     private readonly QuakeMap m_map;
+    private readonly DevConsole m_devConsole = new();
     private World m_world = World.Create();
     private Shader m_mapShader;
     private Shader m_skyboxShader;
     private SceneRenderer m_sceneRenderer;
+    private ImGuiController m_guiController;
 
     public Game(int width, int height, string title) :
         base(GameWindowSettings.Default,
             new NativeWindowSettings { ClientSize = (width, height), Title = title })
     {
+        var mapPath = "Assets/Maps/de_dust2.bsp";
         m_map = QuakeMapLoader.Load(
-            "Assets/Maps/de_dust2.bsp",
+            m_devConsole,
+            mapPath,
             "Assets/Maps/cs_palette.lmp",
             "Assets/WADs/de_aztec.wad",
             "Assets/WADs/cs_dust.wad",
@@ -41,7 +46,7 @@ public class Game : GameWindow
         base.OnLoad();
         GL.Enable(EnableCap.DepthTest);
         GL.ClearColor(1, 0f, 0f, 1.0f);
-        
+
         LoadShaders();
         CreateCamera();
 
@@ -53,6 +58,7 @@ public class Game : GameWindow
             m_mapShader,
             m_skyboxShader,
             SceneRenderer.Options.Default);
+        m_guiController = new ImGuiController(ClientSize.X, ClientSize.Y, new Vector2(2, 2));
     }
 
     protected override void OnUnload()
@@ -65,22 +71,30 @@ public class Game : GameWindow
         base.OnUpdateFrame(args);
 
         m_world.Progress((float)args.Time);
+        m_guiController.Update(this, (float)args.Time);
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
-        
+
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         m_sceneRenderer.Render();
+        m_devConsole.Render();
+        m_guiController.Render();
         SwapBuffers();
     }
 
     protected override void OnFramebufferResize(FramebufferResizeEventArgs e)
     {
         base.OnFramebufferResize(e);
-        
         GL.Viewport(0, 0, e.Width, e.Height);
+    }
+
+    protected override void OnResize(ResizeEventArgs e)
+    {
+        base.OnResize(e);
+        m_guiController.WindowResized(ClientSize.X, ClientSize.Y);
     }
 
     private void CreateCamera()
